@@ -7,6 +7,7 @@ type ToolbarProps = {
   mode: Mode;
   hasDocument: boolean;
   dark: boolean;
+  busy: boolean;
   onOpen: () => void;
   onSave: () => void;
   onModeChange: () => void;
@@ -21,6 +22,7 @@ export default function Toolbar({
   mode,
   hasDocument,
   dark,
+  busy,
   onOpen,
   onSave,
   onModeChange,
@@ -36,10 +38,10 @@ export default function Toolbar({
         </span>
       </div>
       <nav className="toolbar" aria-label="Ações do documento">
-        <button className="quiet-button" onClick={onOpen} title="Abrir (Ctrl+O)">Abrir</button>
-        <button className="quiet-button" onClick={onSave} title="Salvar (Ctrl+S)" disabled={!hasDocument}>Salvar</button>
+        <button className="quiet-button" onClick={onOpen} title="Abrir (Ctrl+O)" disabled={busy}>Abrir</button>
+        <button className="quiet-button" onClick={onSave} title="Salvar (Ctrl+S)" disabled={!hasDocument || busy}>Salvar</button>
         <span className="toolbar-divider" />
-        <button className="quiet-button mode-button" onClick={onModeChange} title="Alternar modo (Ctrl+E)" disabled={!hasDocument}>
+        <button className="quiet-button mode-button" onClick={onModeChange} title="Alternar modo (Ctrl+E)" disabled={!hasDocument || busy}>
           <span className="mode-indicator" />{mode === "read" ? "Editar" : "Ler"}
         </button>
         <button className="icon-button" onClick={onSearch} title="Buscar (Ctrl+F)" aria-label="Buscar">

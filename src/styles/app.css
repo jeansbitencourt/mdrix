@@ -138,6 +138,34 @@ button, input { font: inherit; }
 .reader-surface { background: var(--background); }
 .editor-surface { overflow: hidden; padding: 20px 14px 16px 7px; }
 
+.loading-overlay {
+  position: absolute;
+  z-index: 5;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--background) 88%, transparent);
+  font-size: 13px;
+  backdrop-filter: blur(3px);
+}
+
+.loading-spinner {
+  display: inline-block;
+  width: 17px;
+  height: 17px;
+  flex: none;
+  border: 2px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: mdrix-spin 750ms linear infinite;
+  will-change: transform;
+}
+
+@keyframes mdrix-spin { to { transform: rotate(360deg); } }
+
 .editor-surface .cm-theme, .editor-surface .cm-editor {
   height: 100%;
   color: var(--text);
@@ -160,6 +188,39 @@ button, input { font: inherit; }
   line-height: 1.78;
   overflow-wrap: anywhere;
 }
+
+.markdown-virtual-document { position: relative; min-height: 100%; }
+.markdown-progress-anchor { position: sticky; z-index: 4; top: 10px; height: 0; pointer-events: none; }
+.markdown-progress {
+  display: grid;
+  grid-template-columns: 17px minmax(0, 1fr);
+  align-items: center;
+  gap: 4px 10px;
+  width: min(390px, 100%);
+  margin: 10px auto 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+  backdrop-filter: blur(8px);
+  font-size: 12px;
+}
+.markdown-progress .loading-spinner { grid-row: span 2; }
+.markdown-progress-copy { display: grid; gap: 3px; min-width: 0; }
+.markdown-progress-copy strong { font-weight: 550; }
+.markdown-progress-copy small { color: var(--text-muted); font-size: 10px; }
+.markdown-progress progress { grid-column: 2; width: 100%; height: 3px; accent-color: var(--accent); }
+.markdown-render-error { display: grid; gap: 8px; padding: 20px; border: 1px solid var(--border); border-radius: 9px; color: var(--danger); background: var(--surface); font-size: 13px; }
+.markdown-render-error span, .markdown-render-error small { color: var(--text-muted); }
+.markdown-virtual-spacer { position: relative; width: 100%; }
+.markdown-virtual-block { position: absolute; inset-inline: 0; display: flow-root; width: 100%; }
+.markdown-virtual-block > p, .markdown-virtual-block > ul, .markdown-virtual-block > ol, .markdown-virtual-block > blockquote, .markdown-virtual-block > pre, .markdown-virtual-block > table { margin: 0 0 1.05em; }
+.markdown-virtual-block > h1 { margin: 0 0 28px; }
+.markdown-virtual-block > h2 { margin: 1.1em 0 .7em; }
+.markdown-virtual-block > h3 { margin: 1.1em 0 .55em; }
+.markdown-virtual-block[data-virtual-index="0"] > h2, .markdown-virtual-block[data-virtual-index="0"] > h3 { margin-top: 0; }
 
 .markdown-document > :first-child { margin-top: 0; }
 .markdown-document h1, .markdown-document h2, .markdown-document h3, .markdown-document h4 { color: var(--text); line-height: 1.28; letter-spacing: -.025em; }

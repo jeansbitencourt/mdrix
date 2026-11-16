@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from "react";
+import { Children, isValidElement, memo, useEffect, useMemo, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -7,8 +7,11 @@ import rehypeHighlight from "rehype-highlight";
 import rehypeSlug from "rehype-slug";
 import { invoke } from "@tauri-apps/api/core";
 import MermaidBlock from "./MermaidBlock";
+import MarkdownMath from "./MarkdownMath";
+import MarkdownWorkerRenderer from "./MarkdownWorkerRenderer";
 
 type Props = { content: string; documentPath: string; dark: boolean; onError: (message: string | null) => void };
+const largeDocumentThreshold = 128 * 1024;
 
 function LocalImage({ src, alt, documentPath }: { src?: string; alt?: string; documentPath: string }) {
   const [dataUrl, setDataUrl] = useState<string | null>(null);
@@ -34,7 +37,7 @@ function LocalImage({ src, alt, documentPath }: { src?: string; alt?: string; do
 }
 
 const MarkdownViewer = memo(function MarkdownViewer({ content, documentPath, dark, onError }: Props) {
-  const components: Components = {
+  const components = useMemo<Components>(() => ({
     img({ src, alt }) {
       return <LocalImage src={src} alt={alt} documentPath={documentPath} />;
     },
@@ -59,16 +62,34 @@ const MarkdownViewer = memo(function MarkdownViewer({ content, documentPath, dar
       );
     },
     code({ className, children, ...props }) {
-      const language = /language-([\w-]+)/.exec(className ?? "")?.[1];
+      const classes = className ?? "";
+      const language = /language-([\w-]+)/.exec(classes)?.[1];
       if (language === "mermaid") {
         return <MermaidBlock chart={String(children).replace(/\n$/, "")} dark={dark} />;
       }
+      if (classes.includes("math-inline")) {
+        return <MarkdownMath expression={String(children)} display={false} />;
+      }
+      if (language === "math") {
+        return <MarkdownMath expression={String(children).replace(/\n$/, "")} display />;
+      }
       return <code className={className} {...props}>{children}</code>;
+    },
+    pre({ children, ...props }) {
+      const child = Children.toArray(children);
+      if (child.length === 1 && isValidElement(child[0]) && child[0].type === MarkdownMath) {
+        return child[0];
+      }
+      return <pre {...props}>{children}</pre>;
     },
     input({ checked, ...props }) {
       return <input type="checkbox" checked={checked} disabled {...props} />;
     },
-  };
+  }), [dark, documentPath, onError]);
+
+  if (content.length >= largeDocumentThreshold) {
+    return <MarkdownWorkerRenderer content={content} components={components} />;
+  }
 
   return (
     <article className="markdown-document">

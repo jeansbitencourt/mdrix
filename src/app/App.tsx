@@ -6,7 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import EmptyState from "../components/EmptyState";
-import { Notice, PendingChanges } from "../components/Feedback";
+import { LoadingOverlay, Notice, PendingChanges } from "../components/Feedback";
 import SearchStrip from "../components/SearchStrip";
 import StatusBar from "../components/StatusBar";
 import Toolbar from "../components/Toolbar";
@@ -26,6 +26,7 @@ export default function App() {
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [loadingMessage, setLoadingMessage] = useState<string | null>(null);
   const [scrollProgress, setScrollProgress] = useState(0);
   const dirty = content !== savedContent;
 
@@ -35,6 +36,7 @@ export default function App() {
   const contentRef = useRef(content);
   const documentRef = useRef(document);
   const pendingRef = useRef(pending);
+  const loadSequenceRef = useRef(0);
   dirtyRef.current = dirty;
   contentRef.current = content;
   documentRef.current = document;
@@ -55,8 +57,14 @@ export default function App() {
   }, [mode]);
 
   const loadPath = useCallback(async (path: string) => {
+    const sequence = loadSequenceRef.current + 1;
+    loadSequenceRef.current = sequence;
+    setLoadingMessage("Abrindo documento…");
+    setError(null);
+    setStatus(null);
     try {
       const loaded = await invoke<LoadedDocument>("load_document", { path });
+      if (sequence !== loadSequenceRef.current) return;
       const normalized = normalizeNewlines(loaded.content);
       setDocument({ ...loaded, content: normalized });
       setContent(normalized);
@@ -67,7 +75,9 @@ export default function App() {
       setPending(null);
       setScrollProgress(0);
     } catch (cause) {
-      setError(String(cause));
+      if (sequence === loadSequenceRef.current) setError(String(cause));
+    } finally {
+      if (sequence === loadSequenceRef.current) setLoadingMessage(null);
     }
   }, []);
 
@@ -156,6 +166,9 @@ export default function App() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!event.ctrlKey && !event.metaKey) return;
+      if (loadingMessage) {
+        return;
+      }
       const key = event.key.toLowerCase();
       if (key === "o") {
         event.preventDefault();
@@ -173,7 +186,12 @@ export default function App() {
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [handleModeChange, openFile, saveCurrent]);
+  }, [handleModeChange, loadingMessage, openFile, saveCurrent]);
+
+  useEffect(() => {
+    if (mode !== "edit") return;
+    return () => { editorViewRef.current = null; };
+  }, [mode]);
 
   useEffect(() => {
     const target = mode === "read" ? viewerRef.current : editorViewRef.current?.scrollDOM;
@@ -196,6 +214,7 @@ export default function App() {
         mode={mode}
         hasDocument={Boolean(document)}
         dark={dark}
+        busy={Boolean(loadingMessage)}
         onOpen={() => void openFile()}
         onSave={() => void saveCurrent()}
         onModeChange={handleModeChange}
@@ -229,27 +248,32 @@ export default function App() {
       )}
 
       <section className="workspace">
-        <div className={`surface reader-surface ${mode === "read" ? "" : "is-hidden"}`} ref={viewerRef}>
-          {document ? (
-            <MarkdownViewer content={renderedContent} documentPath={document.path} dark={dark} onError={setError} />
-          ) : (
-            <EmptyState onOpen={() => void openFile()} />
-          )}
-        </div>
-        <div className={`surface editor-surface ${mode === "edit" ? "" : "is-hidden"}`}>
-          <CodeMirror
-            key={document?.path ?? "empty-document"}
-            value={content}
-            height="100%"
-            theme={dark ? "dark" : "light"}
-            extensions={editorExtensions}
-            onCreateEditor={(view) => { editorViewRef.current = view; }}
-            onChange={(value) => { setContent(normalizeNewlines(value)); setStatus(null); }}
-            placeholder="Escreva em Markdown…"
-            basicSetup={{ lineNumbers: true, foldGutter: false, highlightActiveLine: true }}
-          />
-          {!document && <div className="editor-hint">O conteúdo novo só pode ser salvo depois de abrir um arquivo existente.</div>}
-        </div>
+        {mode === "read" && (
+          <div className="surface reader-surface" ref={viewerRef}>
+            {document ? (
+              <MarkdownViewer content={renderedContent} documentPath={document.path} dark={dark} onError={setError} />
+            ) : (
+              <EmptyState onOpen={() => void openFile()} />
+            )}
+          </div>
+        )}
+        {mode === "edit" && (
+          <div className="surface editor-surface">
+            <CodeMirror
+              key={document?.path ?? "empty-document"}
+              value={content}
+              height="100%"
+              theme={dark ? "dark" : "light"}
+              extensions={editorExtensions}
+              onCreateEditor={(view) => { editorViewRef.current = view; }}
+              onChange={(value) => { setContent(normalizeNewlines(value)); setStatus(null); }}
+              placeholder="Escreva em Markdown…"
+              basicSetup={{ lineNumbers: true, foldGutter: false, highlightActiveLine: true }}
+            />
+            {!document && <div className="editor-hint">O conteúdo novo só pode ser salvo depois de abrir um arquivo existente.</div>}
+          </div>
+        )}
+        {loadingMessage && <LoadingOverlay message={loadingMessage} />}
       </section>
       <StatusBar mode={mode} hasDocument={Boolean(document)} characterCount={content.length} />
     </main>
