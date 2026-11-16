@@ -27,7 +27,13 @@ pub(crate) fn take_launch_path(state: State<'_, LaunchPath>) -> Option<String> {
 }
 
 #[tauri::command]
-pub(crate) fn load_document(path: String) -> Result<DocumentPayload, String> {
+pub(crate) async fn load_document(path: String) -> Result<DocumentPayload, String> {
+    tauri::async_runtime::spawn_blocking(move || load_document_blocking(path))
+        .await
+        .map_err(|error| format!("Não foi possível carregar o arquivo: {error}"))?
+}
+
+fn load_document_blocking(path: String) -> Result<DocumentPayload, String> {
     let path = PathBuf::from(path)
         .canonicalize()
         .map_err(|error| format!("Não foi possível resolver o arquivo: {error}"))?;
@@ -51,7 +57,19 @@ pub(crate) fn load_document(path: String) -> Result<DocumentPayload, String> {
 }
 
 #[tauri::command]
-pub(crate) fn save_document(
+pub(crate) async fn save_document(
+    path: String,
+    expected_hash: String,
+    contents: String,
+) -> Result<SavePayload, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        save_document_blocking(path, expected_hash, contents)
+    })
+    .await
+    .map_err(|error| format!("Não foi possível salvar o arquivo: {error}"))?
+}
+
+fn save_document_blocking(
     path: String,
     expected_hash: String,
     contents: String,
