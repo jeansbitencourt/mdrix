@@ -75,6 +75,13 @@ const MarkdownViewer = memo(function MarkdownViewer({ content, documentPath, dar
       }
       return <code className={className} {...props}>{children}</code>;
     },
+    table({ children, ...props }) {
+      return (
+        <div className="markdown-table-scroll" role="region" aria-label="Tabela Markdown rolável" tabIndex={0}>
+          <table {...props}>{children}</table>
+        </div>
+      );
+    },
     pre({ children, ...props }) {
       const child = Children.toArray(children);
       if (child.length === 1 && isValidElement(child[0]) && child[0].type === MarkdownMath) {
