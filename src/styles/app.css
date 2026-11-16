@@ -30,6 +30,10 @@ button, input { font: inherit; }
   --accent: #9bb6ef;
   --accent-ink: #162039;
   --danger: #e6a5a5;
+  --editor-surface: #191c21;
+  --editor-gutter: #17191d;
+  --editor-active-line: rgb(155 182 239 / 7%);
+  --editor-selection: rgb(155 182 239 / 24%);
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -50,6 +54,10 @@ button, input { font: inherit; }
   --accent: #50699e;
   --accent-ink: #fff;
   --danger: #a44f4f;
+  --editor-surface: #fbfaf8;
+  --editor-gutter: #f0efeb;
+  --editor-active-line: rgb(80 105 158 / 8%);
+  --editor-selection: rgb(80 105 158 / 22%);
   color-scheme: light;
 }
 
@@ -136,7 +144,28 @@ button, input { font: inherit; }
 .surface { position: absolute; inset: 0; overflow: auto; }
 .surface.is-hidden { display: none; }
 .reader-surface { background: var(--background); }
-.editor-surface { overflow: hidden; padding: 20px 14px 16px 7px; }
+.editor-surface {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 12px 18px;
+  background: var(--background);
+}
+
+.editor-frame {
+  position: relative;
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--editor-surface);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 8%);
+}
 
 .loading-overlay {
   position: absolute;
@@ -166,18 +195,73 @@ button, input { font: inherit; }
 
 @keyframes mdrix-spin { to { transform: rotate(360deg); } }
 
-.editor-surface .cm-theme, .editor-surface .cm-editor {
+.editor-frame > div {
+  display: flex;
+  width: 100%;
   height: 100%;
-  color: var(--text);
-  background: transparent;
+  min-height: 0;
+  max-height: 100%;
+  flex-direction: column;
+  overflow: hidden;
 }
 
-.editor-surface .cm-scroller { overflow: auto; font-family: "JetBrains Mono", "Cascadia Code", ui-monospace, monospace; font-size: 13px; line-height: 1.72; }
-.editor-surface .cm-gutters { color: var(--text-muted); border: 0; background: transparent; }
-.editor-surface .cm-activeLine, .editor-surface .cm-activeLineGutter { background: color-mix(in srgb, var(--accent) 7%, transparent); }
-.editor-surface .cm-cursor { border-left-color: var(--accent); }
-.editor-surface .cm-selectionBackground, .editor-surface .cm-focused .cm-selectionBackground { background: color-mix(in srgb, var(--accent) 25%, transparent); }
-.editor-hint { position: absolute; right: 22px; bottom: 18px; color: var(--text-muted); font-size: 11px; pointer-events: none; }
+.editor-surface .cm-editor {
+  display: flex;
+  width: 100%;
+  height: 100% !important;
+  min-height: 0;
+  max-height: 100%;
+  flex: 1 1 auto;
+  flex-direction: column;
+  color: var(--text);
+  background: transparent;
+  outline: none;
+}
+
+.editor-surface .cm-scroller {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 100%;
+  overflow: auto !important;
+  overscroll-behavior: contain;
+  scrollbar-color: var(--border) transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  font-family: "JetBrains Mono", "Cascadia Code", ui-monospace, monospace;
+  font-size: 13px;
+  line-height: 1.72;
+}
+
+.editor-surface .cm-content { min-height: 100%; padding: 18px 0 38px; caret-color: var(--accent); }
+.editor-surface .cm-line { padding: 0 18px; }
+.editor-surface .cm-gutters {
+  color: var(--text-muted);
+  border-right: 1px solid var(--border);
+  background: var(--editor-gutter);
+}
+.editor-surface .cm-lineNumbers .cm-gutterElement { min-width: 48px; padding: 0 12px 0 8px; }
+.editor-surface .cm-foldGutter .cm-gutterElement { padding: 0 5px; }
+.editor-surface .cm-activeLine, .editor-surface .cm-activeLineGutter { background: var(--editor-active-line); }
+.editor-surface .cm-cursor, .editor-surface .cm-dropCursor { border-left-color: var(--accent); }
+.editor-surface .cm-selectionBackground, .editor-surface .cm-focused .cm-selectionBackground { background: var(--editor-selection); }
+.editor-surface .cm-line::selection, .editor-surface .cm-line > span::selection { background: var(--editor-selection); }
+.editor-surface .cm-placeholder { color: var(--text-muted); }
+.editor-surface .cm-scroller::-webkit-scrollbar { width: 9px; height: 9px; }
+.editor-surface .cm-scroller::-webkit-scrollbar-thumb { border: 2px solid var(--editor-surface); border-radius: 9px; background: var(--border); }
+.editor-surface .cm-scroller::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+.editor-hint {
+  position: absolute;
+  z-index: 2;
+  right: 30px;
+  bottom: 20px;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--editor-surface) 92%, transparent);
+  font-size: 11px;
+  pointer-events: none;
+}
 
 .markdown-document {
   width: min(100%, 820px);

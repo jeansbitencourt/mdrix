@@ -259,17 +259,31 @@ export default function App() {
         )}
         {mode === "edit" && (
           <div className="surface editor-surface">
-            <CodeMirror
-              key={document?.path ?? "empty-document"}
-              value={content}
-              height="100%"
-              theme={dark ? "dark" : "light"}
-              extensions={editorExtensions}
-              onCreateEditor={(view) => { editorViewRef.current = view; }}
-              onChange={(value) => { setContent(normalizeNewlines(value)); setStatus(null); }}
-              placeholder="Escreva em Markdown…"
-              basicSetup={{ lineNumbers: true, foldGutter: false, highlightActiveLine: true }}
-            />
+            <div className="editor-frame">
+              <CodeMirror
+                key={document?.path ?? "empty-document"}
+                value={content}
+                height="100%"
+                minHeight="100%"
+                maxHeight="100%"
+                width="100%"
+                theme={dark ? "dark" : "light"}
+                extensions={editorExtensions}
+                onCreateEditor={(view) => { editorViewRef.current = view; }}
+                onChange={(value) => { setContent(normalizeNewlines(value)); setStatus(null); }}
+                placeholder="Escreva em Markdown…"
+                basicSetup={{
+                  lineNumbers: true,
+                  foldGutter: true,
+                  highlightActiveLine: true,
+                  highlightActiveLineGutter: true,
+                  indentOnInput: true,
+                  bracketMatching: true,
+                  closeBrackets: true,
+                  tabSize: 2,
+                }}
+              />
+            </div>
             {!document && <div className="editor-hint">O conteúdo novo só pode ser salvo depois de abrir um arquivo existente.</div>}
           </div>
         )}
