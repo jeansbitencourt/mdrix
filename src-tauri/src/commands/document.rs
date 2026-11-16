@@ -2,6 +2,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{fs, io::Write, path::PathBuf};
 use tauri::State;
+use tauri_plugin_dialog::DialogExt;
 use tempfile::NamedTempFile;
 
 use crate::state::LaunchPath;
@@ -24,6 +25,31 @@ pub(crate) struct SavePayload {
 #[tauri::command]
 pub(crate) fn take_launch_path(state: State<'_, LaunchPath>) -> Option<String> {
     state.take()
+}
+
+#[tauri::command]
+pub(crate) async fn open_markdown_dialog(window: tauri::Window) -> Result<Option<String>, String> {
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        window
+            .dialog()
+            .file()
+            .set_parent(&window)
+            .set_title("Abrir documento Markdown")
+            .add_filter("Markdown", &["md", "markdown"])
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|error| format!("Não foi possível abrir o seletor de arquivos: {error}"))?;
+
+    match selected {
+        Some(file) => {
+            let path = file.into_path().map_err(|error| {
+                format!("Não foi possível acessar o arquivo selecionado: {error}")
+            })?;
+            Ok(Some(path.to_string_lossy().into_owned()))
+        }
+        None => Ok(None),
+    }
 }
 
 #[tauri::command]

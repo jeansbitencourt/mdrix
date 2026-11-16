@@ -18,5 +18,5 @@ percent-encoding = "2"
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 tauri = { version = "2", features = [] }
-tauri-plugin-dialog = "2"
+tauri-plugin-dialog = { version = "2", default-features = false, features = ["xdg-portal"] }
 tempfile = "3"

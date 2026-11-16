@@ -5,6 +5,7 @@
 - Siga com Tauri 2, Rust, React e TypeScript.
 - `src/app` coordena estado e ciclo de vida do documento; `src/components` contém a interface; `src/markdown` contém a visualização.
 - `src-tauri/src/commands` agrupa comandos por responsabilidade. O backend Rust mantém o acesso ao sistema de arquivos e a validação dos caminhos.
+- No Linux/Wayland, o seletor de arquivos deve usar o portal XDG com a janela principal como parent; mantenha também a guarda contra aberturas simultâneas na interface.
 - Mantenha a renderização offline por padrão e preserve os limites de segurança para imagens locais e links externos.
 - Centralize documentação em `README.md` e neste arquivo.
 

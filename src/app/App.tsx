@@ -4,7 +4,6 @@ import { markdown } from "@codemirror/lang-markdown";
 import type { EditorView } from "@codemirror/view";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { open } from "@tauri-apps/plugin-dialog";
 import EmptyState from "../components/EmptyState";
 import { LoadingOverlay, Notice, PendingChanges } from "../components/Feedback";
 import SearchStrip from "../components/SearchStrip";
@@ -27,8 +26,10 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [loadingMessage, setLoadingMessage] = useState<string | null>(null);
+  const [openingDialog, setOpeningDialog] = useState(false);
   const [scrollProgress, setScrollProgress] = useState(0);
   const dirty = content !== savedContent;
+  const busy = Boolean(loadingMessage) || openingDialog;
 
   const viewerRef = useRef<HTMLDivElement>(null);
   const editorViewRef = useRef<EditorView | null>(null);
@@ -37,6 +38,7 @@ export default function App() {
   const documentRef = useRef(document);
   const pendingRef = useRef(pending);
   const loadSequenceRef = useRef(0);
+  const openDialogRef = useRef(false);
   dirtyRef.current = dirty;
   contentRef.current = content;
   documentRef.current = document;
@@ -90,15 +92,17 @@ export default function App() {
   }, [loadPath]);
 
   const openFile = useCallback(async () => {
+    if (openDialogRef.current) return;
+    openDialogRef.current = true;
+    setOpeningDialog(true);
     try {
-      const selected = await open({
-        multiple: false,
-        directory: false,
-        filters: [{ name: "Markdown", extensions: ["md", "markdown"] }],
-      });
+      const selected = await invoke<string | null>("open_markdown_dialog");
       if (typeof selected === "string") await requestOpen(selected);
     } catch (cause) {
       setError(String(cause));
+    } finally {
+      openDialogRef.current = false;
+      setOpeningDialog(false);
     }
   }, [requestOpen]);
 
@@ -166,7 +170,7 @@ export default function App() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!event.ctrlKey && !event.metaKey) return;
-      if (loadingMessage) {
+      if (loadingMessage || openingDialog) {
         return;
       }
       const key = event.key.toLowerCase();
@@ -186,7 +190,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [handleModeChange, loadingMessage, openFile, saveCurrent]);
+  }, [handleModeChange, loadingMessage, openingDialog, openFile, saveCurrent]);
 
   useEffect(() => {
     if (mode !== "edit") return;
@@ -214,7 +218,7 @@ export default function App() {
         mode={mode}
         hasDocument={Boolean(document)}
         dark={dark}
-        busy={Boolean(loadingMessage)}
+        busy={busy}
         onOpen={() => void openFile()}
         onSave={() => void saveCurrent()}
         onModeChange={handleModeChange}
