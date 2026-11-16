@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Permissões mínimas para a janela principal do Mdrix.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "core:window:allow-destroy"]
 }
