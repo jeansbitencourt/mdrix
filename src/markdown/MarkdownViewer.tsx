@@ -1,0 +1,87 @@
+import { memo, useEffect, useState } from "react";
+import ReactMarkdown, { type Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import rehypeHighlight from "rehype-highlight";
+import rehypeSlug from "rehype-slug";
+import { invoke } from "@tauri-apps/api/core";
+import MermaidBlock from "./MermaidBlock";
+
+type Props = { content: string; documentPath: string; dark: boolean; onError: (message: string | null) => void };
+
+function LocalImage({ src, alt, documentPath }: { src?: string; alt?: string; documentPath: string }) {
+  const [dataUrl, setDataUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setDataUrl(null);
+    setFailed(false);
+    if (!src || /^(https?:|data:|file:|\/\/)/i.test(src)) {
+      setFailed(true);
+      return () => { cancelled = true; };
+    }
+    void invoke<string>("read_relative_image", { documentPath, relativePath: src })
+      .then((data) => { if (!cancelled) setDataUrl(data); })
+      .catch(() => { if (!cancelled) setFailed(true); });
+    return () => { cancelled = true; };
+  }, [src, documentPath]);
+
+  if (failed) return <span className="image-missing">Imagem local indisponível: {alt || src || "sem descrição"}</span>;
+  if (!dataUrl) return <span className="image-loading">Carregando imagem…</span>;
+  return <img src={dataUrl} alt={alt ?? ""} loading="lazy" />;
+}
+
+const MarkdownViewer = memo(function MarkdownViewer({ content, documentPath, dark, onError }: Props) {
+  const components: Components = {
+    img({ src, alt }) {
+      return <LocalImage src={src} alt={alt} documentPath={documentPath} />;
+    },
+    a({ href, children, ...props }) {
+      const isExternal = /^https?:\/\//i.test(href ?? "") || /^mailto:/i.test(href ?? "");
+      return (
+        <a
+          {...props}
+          href={href}
+          onClick={(event) => {
+            if (href?.startsWith("#")) return;
+            event.preventDefault();
+            if (!isExternal || !href) {
+              onError("Links para outros arquivos ainda não estão habilitados.");
+              return;
+            }
+            void invoke("open_external", { url: href }).catch((cause) => onError(String(cause)));
+          }}
+        >
+          {children}
+        </a>
+      );
+    },
+    code({ className, children, ...props }) {
+      const language = /language-([\w-]+)/.exec(className ?? "")?.[1];
+      if (language === "mermaid") {
+        return <MermaidBlock chart={String(children).replace(/\n$/, "")} dark={dark} />;
+      }
+      return <code className={className} {...props}>{children}</code>;
+    },
+    input({ checked, ...props }) {
+      return <input type="checkbox" checked={checked} disabled {...props} />;
+    },
+  };
+
+  return (
+    <article className="markdown-document">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex, [rehypeHighlight, { detect: false, ignoreMissing: true }], rehypeSlug]}
+        components={components}
+        skipHtml
+      >
+        {content}
+      </ReactMarkdown>
+    </article>
+  );
+});
+
+export default MarkdownViewer;
