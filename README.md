@@ -22,6 +22,18 @@ Na raiz do repositório:
 
 O app também abre documentos pela interface ou com Ctrl+O e salva com Ctrl+S.
 
+## Instalação local no Linux
+
+Para compilar e instalar o app para o usuário atual, incluindo o atalho no launcher e o ícone:
+
+```sh
+./packaging/install-linux.sh
+```
+
+O script não exige root. Ele instala o executável em `$XDG_DATA_HOME/mdrix` (ou `~/.local/share/mdrix`), registra o arquivo `.desktop` e anuncia suporte a `text/markdown` e `text/x-markdown` para que Mdrix apareça em “Abrir com”. A instalação não altera o aplicativo padrão para arquivos Markdown. Os requisitos nativos de build e o WebKitGTK 4.1 continuam sendo fornecidos pela distro.
+
+Use `./packaging/install-linux.sh --no-build` para instalar um executável já compilado em `src-tauri/target/release/mdrix`, ou `./packaging/install-linux.sh --uninstall` para remover os arquivos instalados pelo script.
+
 ## Estrutura
 
 - `src/app`: estado da aplicação e ciclo de vida do documento.
