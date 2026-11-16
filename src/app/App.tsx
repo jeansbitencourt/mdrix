@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CodeMirror from "@uiw/react-codemirror";
-import { markdown } from "@codemirror/lang-markdown";
-import type { EditorView } from "@codemirror/view";
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { EditorView } from "@codemirror/view";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import EmptyState from "../components/EmptyState";
@@ -10,6 +10,7 @@ import SearchStrip from "../components/SearchStrip";
 import StatusBar from "../components/StatusBar";
 import Toolbar from "../components/Toolbar";
 import MarkdownViewer from "../markdown/MarkdownViewer";
+import { markdownEditorHighlighting } from "../markdown/editorHighlight";
 import { countOccurrences, normalizeNewlines } from "./text";
 import type { LoadedDocument, Mode, PendingAction } from "./types";
 
@@ -205,7 +206,11 @@ export default function App() {
     });
   }, [mode, scrollProgress, document?.path]);
 
-  const editorExtensions = useMemo(() => [markdown()], []);
+  const editorExtensions = useMemo(() => [
+    markdown({ base: markdownLanguage }),
+    ...markdownEditorHighlighting,
+    EditorView.lineWrapping,
+  ], []);
   const fileName = document?.path.split(/[\\/]/).at(-1) ?? "Sem documento";
   const occurrenceCount = countOccurrences(content, search);
 
