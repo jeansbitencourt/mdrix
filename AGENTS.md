@@ -18,14 +18,17 @@ A separação atual entre SPA e núcleo Rust é adequada ao modelo do Tauri. Nã
 
 ## Responsividade de documentos grandes
 
-A abertura de um arquivo com aproximadamente 2 MiB congelou a interface por mais de um minuto. Esse bug é um bloqueador para distribuição.
+A abertura de um arquivo com aproximadamente 2 MiB congelava a interface por mais de um minuto. O fluxo foi alterado para manter o WebView responsivo, mas a regressão ainda é um bloqueador de distribuição até passar pela validação manual em build de produção.
 
-Investigue as etapas separadamente, sem presumir uma causa antes de medir:
+Implementação atual:
 
-1. `load_document` e `save_document` são comandos Rust síncronos e fazem I/O. A documentação do Tauri recomenda comandos assíncronos para trabalho pesado; avalie I/O assíncrono ou `spawn_blocking`. Um comando `async` que chama `std::fs` diretamente ainda pode bloquear uma thread do runtime.
-2. A interface renderiza o Markdown inteiro e mantém CodeMirror montado mesmo quando o modo de edição está oculto. Meça o custo de cada caminho e teste montar somente a superfície visível.
-3. Meça o custo de serializar e enviar o texto via IPC. Só considere uma resposta binária ou transmissão em partes se o perfil mostrar que a transferência JSON é relevante.
-4. Valide abertura, rolagem e edição em build de produção usando os arquivos de `fixtures/`. A interface deve continuar respondendo durante a carga e as trocas de modo não podem perder conteúdo ou posição.
+- `load_document` e `save_document` movem I/O e hash para `tauri::async_runtime::spawn_blocking`; não use `std::fs` diretamente em um comando `async`.
+- `MarkdownViewer` usa ReactMarkdown para documentos abaixo de 128 KiB. Acima desse limite, `markdown.worker.ts` executa parse, plugins de Markdown, realce e slugs fora da thread de interface; KaTeX é aplicado apenas aos blocos matemáticos visíveis no WebView.
+- O worker envia blocos em lotes e `MarkdownWorkerRenderer` monta apenas blocos próximos à janela visível. Preserve a ordem dos slugs, a posição de rolagem e os plugins suportados ao alterar esse fluxo.
+- `App.tsx` monta somente o leitor ou CodeMirror, de acordo com o modo atual. Evite voltar a manter a superfície inativa montada.
+- O estado de carregamento precisa continuar visível durante a leitura do arquivo e o processamento Markdown. Erros do worker devem deixar o conteúdo acessível no modo de edição.
+
+Valide abertura, rolagem e edição em build de produção usando os arquivos grandes de `fixtures/`. Confirme que a interface responde durante parse e montagem dos blocos, que Mermaid, matemática e imagens locais continuam funcionando e que as trocas de modo preservam conteúdo e posição. Só avalie IPC binário ou transferência em partes se uma medição mostrar que a serialização JSON continua sendo um gargalo.
 
 A documentação oficial do Tauri informa que comandos síncronos rodam na thread principal por padrão, recomenda comandos assíncronos para tarefas pesadas e alerta que respostas JSON grandes podem ter custo. Use isso como orientação para investigar, não como prova isolada da causa do congelamento.
 

@@ -31,11 +31,11 @@ O app também abre documentos pela interface ou com Ctrl+O e salva com Ctrl+S.
 - `src-tauri/src/commands`: operações de documento, imagens locais e links externos.
 - `src-tauri/src/state.rs`: estado de inicialização do app.
 
-## Pendência de desempenho
+## Documentos grandes
 
-Há um bug aberto ao abrir documentos Markdown grandes: um arquivo de aproximadamente 2 MiB congelou a interface por mais de um minuto. Isso precisa ser corrigido antes de distribuir o app. A causa ainda precisa ser isolada; a leitura e conversão do documento no backend, a transferência do texto pelo IPC e a renderização completa na interface são pontos a medir.
+Leitura e salvamento de arquivos usam `spawn_blocking` no núcleo Rust para manter o runtime do Tauri livre. Para documentos com 128 KiB ou mais, um Web Worker faz o parse e os plugins Markdown; a interface recebe os blocos em lotes e virtualiza os que estão fora da área visível. O editor e o leitor são montados sob demanda, e a interface mostra o andamento da leitura e da preparação do Markdown.
 
-A interface também mantém as superfícies de leitura e edição montadas ao mesmo tempo, ocultando a inativa. Avaliar montagem sob demanda e renderização incremental, preservando a troca de modo e o conteúdo do documento.
+Esse fluxo reduz o trabalho síncrono no WebView, mas ainda precisa ser validado com as fixtures locais antes de distribuir o app. Confira renderização de Markdown, Mermaid, matemática, imagens locais, rolagem, troca entre leitura e edição e edição sem perda de conteúdo.
 
 ## Recursos locais de validação
 
