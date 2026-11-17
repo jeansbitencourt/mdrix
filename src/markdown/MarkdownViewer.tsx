@@ -1,4 +1,4 @@
-import { Children, isValidElement, memo, useEffect, useMemo, useState } from "react";
+import { Children, isValidElement, memo, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -9,8 +9,17 @@ import { invoke } from "@tauri-apps/api/core";
 import MermaidBlock from "./MermaidBlock";
 import MarkdownMath from "./MarkdownMath";
 import MarkdownWorkerRenderer from "./MarkdownWorkerRenderer";
+import { rehypeSearch } from "./searchDecorations";
 
-type Props = { content: string; documentPath: string; dark: boolean; onError: (message: string | null) => void };
+type Props = {
+  content: string;
+  documentPath: string;
+  dark: boolean;
+  onError: (message: string | null) => void;
+  search: string;
+  searchOffset: number | null;
+  searchNavigation: number;
+};
 const largeDocumentThreshold = 128 * 1024;
 
 function LocalImage({ src, alt, documentPath }: { src?: string; alt?: string; documentPath: string }) {
@@ -36,7 +45,16 @@ function LocalImage({ src, alt, documentPath }: { src?: string; alt?: string; do
   return <img src={dataUrl} alt={alt ?? ""} loading="lazy" />;
 }
 
-const MarkdownViewer = memo(function MarkdownViewer({ content, documentPath, dark, onError }: Props) {
+const MarkdownViewer = memo(function MarkdownViewer({
+  content,
+  documentPath,
+  dark,
+  onError,
+  search,
+  searchOffset,
+  searchNavigation,
+}: Props) {
+  const articleRef = useRef<HTMLElement>(null);
   const components = useMemo<Components>(() => ({
     img({ src, alt }) {
       return <LocalImage src={src} alt={alt} documentPath={documentPath} />;
@@ -94,15 +112,44 @@ const MarkdownViewer = memo(function MarkdownViewer({ content, documentPath, dar
     },
   }), [dark, documentPath, onError]);
 
+  useEffect(() => {
+    if (content.length >= largeDocumentThreshold || searchOffset === null) return;
+    const article = articleRef.current;
+    const target = article?.querySelector<HTMLElement>(
+      ".markdown-search-match-current, .markdown-search-current-block",
+    );
+    const scrollContainer = article?.parentElement;
+    if (!target || !scrollContainer) return;
+
+    const targetRect = target.getBoundingClientRect();
+    const containerRect = scrollContainer.getBoundingClientRect();
+    const targetTop = targetRect.top - containerRect.top + scrollContainer.scrollTop;
+    const centeredTop = targetTop - (scrollContainer.clientHeight - targetRect.height) / 2;
+    scrollContainer.scrollTo({ top: Math.max(0, centeredTop), behavior: "smooth" });
+  }, [content, search, searchOffset, searchNavigation]);
+
   if (content.length >= largeDocumentThreshold) {
-    return <MarkdownWorkerRenderer content={content} components={components} />;
+    return (
+      <MarkdownWorkerRenderer
+        content={content}
+        components={components}
+        search={search}
+        searchOffset={searchOffset}
+        searchNavigation={searchNavigation}
+      />
+    );
   }
 
   return (
-    <article className="markdown-document">
+    <article className="markdown-document" ref={articleRef}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex, [rehypeHighlight, { detect: false, ignoreMissing: true }], rehypeSlug]}
+        rehypePlugins={[
+          rehypeKatex,
+          [rehypeHighlight, { detect: false, ignoreMissing: true }],
+          rehypeSlug,
+          rehypeSearch(search, searchOffset),
+        ]}
         components={components}
         skipHtml
       >

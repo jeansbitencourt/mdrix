@@ -3,9 +3,16 @@ import { Fragment } from "react";
 import { jsx, jsxs } from "react/jsx-runtime";
 import { toJsxRuntime, type Components as HastComponents } from "hast-util-to-jsx-runtime";
 import type { Components } from "react-markdown";
+import { containsOffset, decorateSearchNode, sourceRange } from "./searchDecorations";
 import type { MarkdownRenderBlock, MarkdownWorkerResponse } from "./workerMessages";
 
-type Props = { content: string; components: Components };
+type Props = {
+  content: string;
+  components: Components;
+  search: string;
+  searchOffset: number | null;
+  searchNavigation: number;
+};
 type Snapshot = {
   content: string;
   blocks: MarkdownRenderBlock[];
@@ -21,13 +28,14 @@ type Measurements = { content: string; values: Map<number, number> };
 const overscan = 720;
 const emptyMeasurements = new Map<number, number>();
 
-export default function MarkdownWorkerRenderer({ content, components }: Props) {
+export default function MarkdownWorkerRenderer({ content, components, search, searchOffset, searchNavigation }: Props) {
   const [snapshot, setSnapshot] = useState<Snapshot>(() => emptySnapshot(content));
   const [measurements, setMeasurements] = useState<Measurements>(() => ({ content, values: new Map() }));
   const [viewport, setViewport] = useState<Viewport>({ offset: 0, height: 0 });
   const articleRef = useRef<HTMLElement>(null);
   const spacerRef = useRef<HTMLDivElement>(null);
   const updateViewportRef = useRef<() => void>(() => undefined);
+  const lastScrolledSearchRef = useRef<string | null>(null);
 
   useEffect(() => {
     const worker = new Worker(new URL("./markdown.worker.ts", import.meta.url), { type: "module" });
@@ -132,6 +140,32 @@ export default function MarkdownWorkerRenderer({ content, components }: Props) {
   }, [blocks.length, layout.height]);
 
   useEffect(() => {
+    if (searchOffset === null) {
+      lastScrolledSearchRef.current = null;
+      return;
+    }
+
+    const requestKey = `${searchNavigation}:${searchOffset}`;
+    if (lastScrolledSearchRef.current === requestKey) return;
+    const blockIndex = blocks.findIndex((block) => containsOffset(block.node.position, searchOffset));
+    if (blockIndex < 0) return;
+
+    const article = articleRef.current;
+    const spacer = spacerRef.current;
+    const scrollContainer = article?.parentElement;
+    if (!spacer || !scrollContainer) return;
+
+    lastScrolledSearchRef.current = requestKey;
+    const spacerRect = spacer.getBoundingClientRect();
+    const containerRect = scrollContainer.getBoundingClientRect();
+    const spacerTop = spacerRect.top - containerRect.top + scrollContainer.scrollTop;
+    scrollContainer.scrollTo({
+      top: spacerTop + layout.offsets[blockIndex],
+      behavior: "smooth",
+    });
+  }, [blocks, layout.offsets, searchOffset, searchNavigation]);
+
+  useEffect(() => {
     const spacer = spacerRef.current;
     if (!spacer || visible.length === 0) return;
 
@@ -199,7 +233,8 @@ export default function MarkdownWorkerRenderer({ content, components }: Props) {
         <div className="markdown-virtual-spacer" ref={spacerRef} style={{ height: layout.height }}>
           {visible.map((block, offset) => {
             const index = start + offset;
-            const tree = { type: "root" as const, children: [block.node] };
+            const decoratedNode = decorateSearchNode(block.node, search, searchOffset);
+            const tree = { type: "root" as const, children: [decoratedNode] };
             const rendered = toJsxRuntime(tree, {
               Fragment,
               jsx,
@@ -207,10 +242,14 @@ export default function MarkdownWorkerRenderer({ content, components }: Props) {
               components: components as Partial<HastComponents>,
               passKeys: true,
             });
+            const range = sourceRange(block.node);
+            const isCurrentBlock = searchOffset !== null && containsOffset(block.node.position, searchOffset);
             return (
               <div
-                className="markdown-virtual-block"
+                className={`markdown-virtual-block${isCurrentBlock ? " markdown-search-current-block" : ""}`}
                 data-virtual-index={index}
+                data-source-start={range?.start}
+                data-source-end={range?.end}
                 key={`${index}-${block.node.position?.start.offset ?? index}`}
                 style={{ top: layout.offsets[index] }}
               >

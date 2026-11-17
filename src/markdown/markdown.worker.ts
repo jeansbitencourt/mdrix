@@ -19,6 +19,7 @@ type WorkerScope = {
 const scope = self as unknown as WorkerScope;
 const maxChunkChars = 8 * 1024;
 const outputBatchSize = 128;
+type MarkdownChunk = { content: string; start: number };
 const parser = unified()
   .use(remarkParse)
   .use(remarkGfm)
@@ -43,11 +44,11 @@ async function processMarkdown({ content }: MarkdownWorkerRequest) {
     let containsFootnotes = false;
 
     for (const chunk of chunks) {
-      const tree = parser.parse(chunk) as MarkdownRoot;
+      const tree = parser.parse(chunk.content) as MarkdownRoot;
       for (const node of tree.children) {
         if (node.type === "footnoteDefinition") containsFootnotes = true;
         if (node.type === "definition" && node.position) {
-          referenceDefinitions.push(chunk.slice(node.position.start.offset, node.position.end.offset));
+          referenceDefinitions.push(chunk.content.slice(node.position.start.offset, node.position.end.offset));
         } else if (node.type !== "html") {
           total += 1;
         }
@@ -70,14 +71,15 @@ async function processMarkdown({ content }: MarkdownWorkerRequest) {
   }
 }
 
-async function renderMarkdownChunks(chunks: string[], definitions: string[], total: number) {
+async function renderMarkdownChunks(chunks: MarkdownChunk[], definitions: string[], total: number) {
   const slugger = new GithubSlugger();
   const definitionPrefix = definitions.length > 0 ? `${definitions.join("\n\n")}\n\n` : "";
   scope.postMessage({ type: "phase", phase: "sending" });
   let processed = 0;
 
   for (const chunk of chunks) {
-    const markdownTree = parser.parse(`${definitionPrefix}${chunk}`) as MarkdownRoot;
+    const markdownTree = parser.parse(`${definitionPrefix}${chunk.content}`) as MarkdownRoot;
+    adjustSourceOffsets(markdownTree, chunk.start - definitionPrefix.length);
     const headingSlugs = createHeadingSlugs(markdownTree, slugger);
     const htmlTree = converter.runSync(markdownTree) as HastRoot;
     const highlightedTree = highlighter.runSync(htmlTree) as HastRoot;
@@ -126,9 +128,9 @@ function visitMarkdownNodes(node: { type: string; children?: unknown[] }, callba
   }
 }
 
-function splitMarkdownSource(content: string): string[] {
+function splitMarkdownSource(content: string): MarkdownChunk[] {
   const lines = content.split("\n");
-  const chunks: string[] = [];
+  const chunks: MarkdownChunk[] = [];
   let chunkStart = 0;
   let lineStart = 0;
   let chunkHasList = false;
@@ -168,7 +170,7 @@ function splitMarkdownSource(content: string): string[] {
     if (isListMarker(line)) chunkHasList = true;
     if (trimmed === "" && lineStart - chunkStart >= maxChunkChars && !keepMarkdownGroup(lines, index, chunkHasList)) {
       const chunk = content.slice(chunkStart, lineStart);
-      if (chunk.trim()) chunks.push(chunk);
+      if (chunk.trim()) chunks.push({ content: chunk, start: chunkStart });
       chunkStart = lineEnd + 1;
       chunkHasList = false;
     }
@@ -177,8 +179,21 @@ function splitMarkdownSource(content: string): string[] {
   }
 
   const lastChunk = content.slice(chunkStart);
-  if (lastChunk.trim()) chunks.push(lastChunk);
-  return chunks.length > 0 ? chunks : [content];
+  if (lastChunk.trim()) chunks.push({ content: lastChunk, start: chunkStart });
+  return chunks.length > 0 ? chunks : [{ content, start: 0 }];
+}
+
+function adjustSourceOffsets(node: { position?: MarkdownRoot["position"]; children?: unknown[] }, offset: number): void {
+  const position = node.position;
+  if (position?.start.offset !== undefined) position.start.offset = Math.max(0, position.start.offset + offset);
+  if (position?.end.offset !== undefined) position.end.offset = Math.max(0, position.end.offset + offset);
+  if (node.children) {
+    for (const child of node.children) {
+      if (child && typeof child === "object" && "type" in child) {
+        adjustSourceOffsets(child as { position?: MarkdownRoot["position"]; children?: unknown[] }, offset);
+      }
+    }
+  }
 }
 
 function keepMarkdownGroup(lines: string[], index: number, chunkHasList: boolean): boolean {

@@ -11,7 +11,7 @@ import StatusBar from "../components/StatusBar";
 import Toolbar from "../components/Toolbar";
 import MarkdownViewer from "../markdown/MarkdownViewer";
 import { markdownEditorHighlighting } from "../markdown/editorHighlight";
-import { countOccurrences, normalizeNewlines } from "./text";
+import { findOccurrences, normalizeNewlines } from "./text";
 import type { LoadedDocument, Mode, PendingAction } from "./types";
 
 export default function App() {
@@ -23,6 +23,8 @@ export default function App() {
   const [dark, setDark] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [searchIndex, setSearchIndex] = useState(-1);
+  const [searchNavigation, setSearchNavigation] = useState(0);
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -31,6 +33,11 @@ export default function App() {
   const [scrollProgress, setScrollProgress] = useState(0);
   const dirty = content !== savedContent;
   const busy = Boolean(loadingMessage) || openingDialog;
+  const searchMatches = useMemo(() => findOccurrences(content, search), [content, search]);
+  const currentSearchIndex = searchMatches.length > 0
+    ? Math.min(Math.max(searchIndex, 0), searchMatches.length - 1)
+    : -1;
+  const activeSearchOffset = currentSearchIndex >= 0 ? searchMatches[currentSearchIndex] : null;
 
   const viewerRef = useRef<HTMLDivElement>(null);
   const editorViewRef = useRef<EditorView | null>(null);
@@ -77,6 +84,8 @@ export default function App() {
       setStatus(null);
       setPending(null);
       setScrollProgress(0);
+      setSearch("");
+      setSearchIndex(-1);
     } catch (cause) {
       if (sequence === loadSequenceRef.current) setError(String(cause));
     } finally {
@@ -186,7 +195,7 @@ export default function App() {
         handleModeChange();
       } else if (key === "f") {
         event.preventDefault();
-        setSearchOpen((current) => !current);
+        setSearchOpen(true);
       }
     };
     window.addEventListener("keydown", onKeyDown, true);
@@ -200,11 +209,21 @@ export default function App() {
 
   useEffect(() => {
     const target = mode === "read" ? viewerRef.current : editorViewRef.current?.scrollDOM;
-    if (!target) return;
+    if (!target || activeSearchOffset !== null) return;
     requestAnimationFrame(() => {
       target.scrollTop = scrollProgress * (target.scrollHeight - target.clientHeight);
     });
   }, [mode, scrollProgress, document?.path]);
+
+  useEffect(() => {
+    if (mode !== "edit" || activeSearchOffset === null) return;
+    const view = editorViewRef.current;
+    if (!view) return;
+    view.dispatch({
+      selection: { anchor: activeSearchOffset, head: activeSearchOffset + search.length },
+      effects: EditorView.scrollIntoView(activeSearchOffset, { y: "center" }),
+    });
+  }, [mode, activeSearchOffset, search, searchNavigation]);
 
   const editorExtensions = useMemo(() => [
     markdown({ base: markdownLanguage }),
@@ -212,7 +231,29 @@ export default function App() {
     EditorView.lineWrapping,
   ], []);
   const fileName = document?.path.split(/[\\/]/).at(-1) ?? "Sem documento";
-  const occurrenceCount = countOccurrences(content, search);
+
+  const changeSearch = useCallback((value: string) => {
+    setSearch(value);
+    setSearchIndex(0);
+    setSearchNavigation((current) => current + 1);
+  }, []);
+
+  const moveSearch = useCallback((direction: -1 | 1) => {
+    if (searchMatches.length === 0) return;
+    setSearchIndex((current) => {
+      if (current < 0) return direction > 0 ? 0 : searchMatches.length - 1;
+      const visibleIndex = Math.min(current, searchMatches.length - 1);
+      return (visibleIndex + direction + searchMatches.length) % searchMatches.length;
+    });
+    setSearchNavigation((current) => current + 1);
+  }, [searchMatches]);
+
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false);
+    setSearch("");
+    setSearchIndex(-1);
+    setSearchNavigation((current) => current + 1);
+  }, []);
 
   return (
     <main className={`app-shell ${dark ? "theme-dark" : "theme-light"}`}>
@@ -227,16 +268,19 @@ export default function App() {
         onOpen={() => void openFile()}
         onSave={() => void saveCurrent()}
         onModeChange={handleModeChange}
-        onSearch={() => setSearchOpen((current) => !current)}
+        onSearch={() => setSearchOpen(true)}
         onThemeChange={() => setDark((current) => !current)}
       />
 
       {searchOpen && (
         <SearchStrip
           value={search}
-          count={occurrenceCount}
-          onChange={setSearch}
-          onClose={() => { setSearchOpen(false); setSearch(""); }}
+          count={searchMatches.length}
+          currentIndex={currentSearchIndex}
+          onChange={changeSearch}
+          onPrevious={() => moveSearch(-1)}
+          onNext={() => moveSearch(1)}
+          onClose={closeSearch}
         />
       )}
 
@@ -260,7 +304,15 @@ export default function App() {
         {mode === "read" && (
           <div className="surface reader-surface" ref={viewerRef}>
             {document ? (
-              <MarkdownViewer content={renderedContent} documentPath={document.path} dark={dark} onError={setError} />
+              <MarkdownViewer
+                content={renderedContent}
+                documentPath={document.path}
+                dark={dark}
+                onError={setError}
+                search={search}
+                searchOffset={activeSearchOffset}
+                searchNavigation={searchNavigation}
+              />
             ) : (
               <EmptyState onOpen={() => void openFile()} />
             )}

@@ -305,6 +305,8 @@ button, input { font: inherit; }
 .markdown-virtual-block > h2 { margin: 1.1em 0 .7em; }
 .markdown-virtual-block > h3 { margin: 1.1em 0 .55em; }
 .markdown-virtual-block[data-virtual-index="0"] > h2, .markdown-virtual-block[data-virtual-index="0"] > h3 { margin-top: 0; }
+.markdown-search-match { padding: 0 .04em; border-radius: 3px; color: inherit; background: color-mix(in srgb, #e8bb5a 42%, transparent); }
+.markdown-search-match-current { background: color-mix(in srgb, #f0a83b 78%, transparent); outline: 1px solid color-mix(in srgb, #c2791e 72%, transparent); }
 
 .markdown-document > :first-child { margin-top: 0; }
 .markdown-document h1, .markdown-document h2, .markdown-document h3, .markdown-document h4 { color: var(--text); line-height: 1.28; letter-spacing: -.025em; }
@@ -373,6 +375,8 @@ kbd { margin-left: 10px; padding: 3px 5px; border-radius: 4px; color: inherit; b
 .search-strip input:focus { border-color: var(--accent); }
 .search-strip span, .confirm-strip > span, .notice > span { flex: 1; }
 .search-strip .icon-button, .notice button { flex: none; border: 0; color: var(--text-muted); background: transparent; cursor: pointer; }
+.search-strip .search-navigation { width: 27px; height: 29px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; }
+.search-strip .search-navigation:disabled { cursor: default; opacity: .4; }
 .confirm-strip { color: var(--text); background: color-mix(in srgb, #b18452 10%, var(--surface)); }
 .confirm-actions { gap: 4px; }
 .danger-button { color: var(--danger); }
