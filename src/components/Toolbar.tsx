@@ -38,18 +38,21 @@ export default function Toolbar({
         </span>
       </div>
       <nav className="toolbar" aria-label="Ações do documento">
-        <button className="quiet-button" onClick={onOpen} title="Abrir (Ctrl+O)" disabled={busy}>Abrir</button>
-        <button className="quiet-button" onClick={onSave} title="Salvar (Ctrl+S)" disabled={!hasDocument || busy}>Salvar</button>
-        <span className="toolbar-divider" />
-        <button className="quiet-button mode-button" onClick={onModeChange} title="Alternar modo (Ctrl+E)" disabled={!hasDocument || busy}>
-          <span className="mode-indicator" />{mode === "read" ? "Editar" : "Ler"}
-        </button>
-        <button className="icon-button" onClick={onSearch} title="Buscar (Ctrl+F)" aria-label="Buscar">
-          <SearchIcon />
-        </button>
-        <button className="icon-button" onClick={onThemeChange} title={dark ? "Tema claro" : "Tema escuro"} aria-label="Alternar tema">
-          {dark ? <SunIcon /> : <MoonIcon />}
-        </button>
+        <div className="toolbar-group" role="group" aria-label="Arquivo">
+          <button className="quiet-button" onClick={onOpen} title="Abrir (Ctrl+O)" disabled={busy}>Abrir</button>
+          <button className="quiet-button" onClick={onSave} title="Salvar (Ctrl+S)" disabled={!hasDocument || busy}>Salvar</button>
+        </div>
+        <div className="toolbar-group" role="group" aria-label="Visualização e ferramentas">
+          <button className="quiet-button mode-button" onClick={onModeChange} title="Alternar modo (Ctrl+E)" disabled={!hasDocument || busy}>
+            <span className="mode-indicator" />{mode === "read" ? "Editar" : "Ler"}
+          </button>
+          <button className="icon-button" onClick={onSearch} title="Buscar (Ctrl+F)" aria-label="Buscar">
+            <SearchIcon />
+          </button>
+          <button className="icon-button" onClick={onThemeChange} title={dark ? "Tema claro" : "Tema escuro"} aria-label="Alternar tema">
+            {dark ? <SunIcon /> : <MoonIcon />}
+          </button>
+        </div>
       </nav>
     </header>
   );
