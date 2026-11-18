@@ -12,7 +12,33 @@ import Toolbar from "../components/Toolbar";
 import MarkdownViewer from "../markdown/MarkdownViewer";
 import { markdownEditorHighlighting } from "../markdown/editorHighlight";
 import { findOccurrences, normalizeNewlines } from "./text";
-import type { LoadedDocument, Mode, PendingAction } from "./types";
+import type { LaunchTarget, LoadedDocument, Mode, PendingAction } from "./types";
+
+type SearchState = { query: string; selectedIndex: number; navigation: number };
+type ScrollRestore = { sourceOffset: number | null; progress: number };
+
+function visibleReaderOffset(surface: HTMLElement): number | null {
+  const viewport = surface.getBoundingClientRect();
+  const candidates = surface.querySelectorAll<HTMLElement>("[data-source-start][data-source-end]");
+  let selected: HTMLElement | null = null;
+  let selectedTop = Number.POSITIVE_INFINITY;
+  for (const candidate of candidates) {
+    const rect = candidate.getBoundingClientRect();
+    if (rect.bottom <= viewport.top + 32 || rect.top >= viewport.bottom) continue;
+    const top = Math.max(rect.top, viewport.top + 32);
+    if (top < selectedTop) {
+      selected = candidate;
+      selectedTop = top;
+    }
+  }
+  const offset = selected?.dataset.sourceStart;
+  return offset === undefined ? null : Number(offset);
+}
+
+function scrollProgress(container: HTMLElement): number {
+  const max = container.scrollHeight - container.clientHeight;
+  return max > 0 ? container.scrollTop / max : 0;
+}
 
 export default function App() {
   const [document, setDocument] = useState<LoadedDocument | null>(null);
@@ -22,20 +48,21 @@ export default function App() {
   const [mode, setMode] = useState<Mode>("read");
   const [dark, setDark] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [search, setSearch] = useState("");
-  const [searchIndex, setSearchIndex] = useState(-1);
-  const [searchNavigation, setSearchNavigation] = useState(0);
+  const [searchState, setSearchState] = useState<SearchState>({ query: "", selectedIndex: -1, navigation: 0 });
+  const search = searchState.query;
+  const searchNavigation = searchState.navigation;
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [loadingMessage, setLoadingMessage] = useState<string | null>(null);
   const [openingDialog, setOpeningDialog] = useState(false);
-  const [scrollProgress, setScrollProgress] = useState(0);
+  const [scrollRestore, setScrollRestore] = useState<ScrollRestore | null>(null);
+  const [targetFragment, setTargetFragment] = useState<string | null>(null);
   const dirty = content !== savedContent;
   const busy = Boolean(loadingMessage) || openingDialog;
   const searchMatches = useMemo(() => findOccurrences(content, search), [content, search]);
   const currentSearchIndex = searchMatches.length > 0
-    ? Math.min(Math.max(searchIndex, 0), searchMatches.length - 1)
+    ? Math.min(Math.max(searchState.selectedIndex, 0), searchMatches.length - 1)
     : -1;
   const activeSearchOffset = currentSearchIndex >= 0 ? searchMatches[currentSearchIndex] : null;
 
@@ -47,10 +74,12 @@ export default function App() {
   const pendingRef = useRef(pending);
   const loadSequenceRef = useRef(0);
   const openDialogRef = useRef(false);
+  const scrollRestoreRef = useRef<ScrollRestore | null>(null);
   dirtyRef.current = dirty;
   contentRef.current = content;
   documentRef.current = document;
   pendingRef.current = pending;
+  scrollRestoreRef.current = scrollRestore;
 
   const handleModeChange = useCallback(() => {
     if (!documentRef.current) {
@@ -60,13 +89,24 @@ export default function App() {
     if (mode === "edit") setRenderedContent(contentRef.current);
     const source = mode === "read" ? viewerRef.current : editorViewRef.current?.scrollDOM;
     if (source) {
-      const max = source.scrollHeight - source.clientHeight;
-      setScrollProgress(max > 0 ? source.scrollTop / max : 0);
+      const restore = {
+        sourceOffset: mode === "read"
+          ? visibleReaderOffset(source)
+          : (() => {
+            const view = editorViewRef.current;
+            if (!view) return null;
+            const rect = view.scrollDOM.getBoundingClientRect();
+            return view.posAtCoords({ x: rect.left + 48, y: rect.top + 32 });
+          })(),
+        progress: scrollProgress(source),
+      };
+      scrollRestoreRef.current = restore;
+      setScrollRestore(restore);
     }
     setMode((current) => current === "read" ? "edit" : "read");
   }, [mode]);
 
-  const loadPath = useCallback(async (path: string) => {
+  const loadPath = useCallback(async (path: string, fragment: string | null = null) => {
     const sequence = loadSequenceRef.current + 1;
     loadSequenceRef.current = sequence;
     setLoadingMessage("Abrindo documento…");
@@ -83,14 +123,42 @@ export default function App() {
       setError(null);
       setStatus(null);
       setPending(null);
-      setScrollProgress(0);
-      setSearch("");
-      setSearchIndex(-1);
+      setScrollRestore(null);
+      scrollRestoreRef.current = null;
+      setTargetFragment(fragment);
+      setSearchState((current) => ({ query: "", selectedIndex: -1, navigation: current.navigation + 1 }));
     } catch (cause) {
       if (sequence === loadSequenceRef.current) setError(String(cause));
     } finally {
       if (sequence === loadSequenceRef.current) setLoadingMessage(null);
     }
+  }, []);
+
+  const restoreEditorPosition = useCallback((view: EditorView) => {
+    const restore = scrollRestoreRef.current;
+    if (!restore) return;
+    if (restore.sourceOffset !== null) {
+      const offset = Math.min(Math.max(restore.sourceOffset, 0), view.state.doc.length);
+      view.dispatch({ effects: EditorView.scrollIntoView(offset, { y: "start", yMargin: 28 }) });
+    } else {
+      const max = view.scrollDOM.scrollHeight - view.scrollDOM.clientHeight;
+      view.scrollDOM.scrollTop = restore.progress * Math.max(0, max);
+    }
+    scrollRestoreRef.current = null;
+    setScrollRestore(null);
+  }, []);
+
+  const handleScrollRestored = useCallback(() => {
+    scrollRestoreRef.current = null;
+    setScrollRestore(null);
+  }, []);
+
+  const handleFragmentNavigated = useCallback(() => {
+    setTargetFragment(null);
+  }, []);
+
+  const handleNavigateFragment = useCallback((fragment: string) => {
+    setTargetFragment(fragment);
   }, []);
 
   const requestOpen = useCallback(async (path: string) => {
@@ -157,8 +225,8 @@ export default function App() {
   }, [loadPath, saveCurrent]);
 
   useEffect(() => {
-    void invoke<string | null>("take_launch_path").then((path) => {
-      if (path) return loadPath(path);
+    void invoke<LaunchTarget | null>("take_launch_path").then((target) => {
+      if (target) return loadPath(target.path, target.fragment);
     }).catch((cause) => setError(String(cause)));
   }, [loadPath]);
 
@@ -208,12 +276,10 @@ export default function App() {
   }, [mode]);
 
   useEffect(() => {
-    const target = mode === "read" ? viewerRef.current : editorViewRef.current?.scrollDOM;
-    if (!target || activeSearchOffset !== null) return;
-    requestAnimationFrame(() => {
-      target.scrollTop = scrollProgress * (target.scrollHeight - target.clientHeight);
-    });
-  }, [mode, scrollProgress, document?.path]);
+    if (mode !== "edit" || !scrollRestore) return;
+    const view = editorViewRef.current;
+    if (view) restoreEditorPosition(view);
+  }, [mode, restoreEditorPosition, scrollRestore]);
 
   useEffect(() => {
     if (mode !== "edit" || activeSearchOffset === null) return;
@@ -233,26 +299,39 @@ export default function App() {
   const fileName = document?.path.split(/[\\/]/).at(-1) ?? "Sem documento";
 
   const changeSearch = useCallback((value: string) => {
-    setSearch(value);
-    setSearchIndex(0);
-    setSearchNavigation((current) => current + 1);
+    setSearchState((current) => ({
+      query: value,
+      selectedIndex: 0,
+      navigation: current.navigation + 1,
+    }));
   }, []);
 
   const moveSearch = useCallback((direction: -1 | 1) => {
     if (searchMatches.length === 0) return;
-    setSearchIndex((current) => {
-      if (current < 0) return direction > 0 ? 0 : searchMatches.length - 1;
-      const visibleIndex = Math.min(current, searchMatches.length - 1);
-      return (visibleIndex + direction + searchMatches.length) % searchMatches.length;
+    setSearchState((current) => {
+      if (current.selectedIndex < 0) {
+        return {
+          ...current,
+          selectedIndex: direction > 0 ? 0 : searchMatches.length - 1,
+          navigation: current.navigation + 1,
+        };
+      }
+      const visibleIndex = Math.min(current.selectedIndex, searchMatches.length - 1);
+      return {
+        ...current,
+        selectedIndex: (visibleIndex + direction + searchMatches.length) % searchMatches.length,
+        navigation: current.navigation + 1,
+      };
     });
-    setSearchNavigation((current) => current + 1);
   }, [searchMatches]);
 
   const closeSearch = useCallback(() => {
     setSearchOpen(false);
-    setSearch("");
-    setSearchIndex(-1);
-    setSearchNavigation((current) => current + 1);
+    setSearchState((current) => ({
+      query: "",
+      selectedIndex: -1,
+      navigation: current.navigation + 1,
+    }));
   }, []);
 
   return (
@@ -312,6 +391,12 @@ export default function App() {
                 search={search}
                 searchOffset={activeSearchOffset}
                 searchNavigation={searchNavigation}
+                restoreOffset={mode === "read" ? scrollRestore?.sourceOffset ?? null : null}
+                restoreProgress={mode === "read" ? scrollRestore?.progress ?? null : null}
+                onScrollRestored={handleScrollRestored}
+                targetFragment={targetFragment}
+                onFragmentNavigated={handleFragmentNavigated}
+                onNavigateFragment={handleNavigateFragment}
               />
             ) : (
               <EmptyState onOpen={() => void openFile()} />
@@ -330,7 +415,10 @@ export default function App() {
                 width="100%"
                 theme={dark ? "dark" : "light"}
                 extensions={editorExtensions}
-                onCreateEditor={(view) => { editorViewRef.current = view; }}
+                onCreateEditor={(view) => {
+                  editorViewRef.current = view;
+                  restoreEditorPosition(view);
+                }}
                 onChange={(value) => { setContent(normalizeNewlines(value)); setStatus(null); }}
                 placeholder="Escreva em Markdown…"
                 basicSetup={{

@@ -12,6 +12,11 @@ type Props = {
   search: string;
   searchOffset: number | null;
   searchNavigation: number;
+  restoreOffset: number | null;
+  restoreProgress: number | null;
+  onScrollRestored: () => void;
+  targetFragment: string | null;
+  onFragmentNavigated: () => void;
 };
 type Snapshot = {
   content: string;
@@ -28,7 +33,18 @@ type Measurements = { content: string; values: Map<number, number> };
 const overscan = 720;
 const emptyMeasurements = new Map<number, number>();
 
-export default function MarkdownWorkerRenderer({ content, components, search, searchOffset, searchNavigation }: Props) {
+export default function MarkdownWorkerRenderer({
+  content,
+  components,
+  search,
+  searchOffset,
+  searchNavigation,
+  restoreOffset,
+  restoreProgress,
+  onScrollRestored,
+  targetFragment,
+  onFragmentNavigated,
+}: Props) {
   const [snapshot, setSnapshot] = useState<Snapshot>(() => emptySnapshot(content));
   const [measurements, setMeasurements] = useState<Measurements>(() => ({ content, values: new Map() }));
   const [viewport, setViewport] = useState<Viewport>({ offset: 0, height: 0 });
@@ -36,6 +52,10 @@ export default function MarkdownWorkerRenderer({ content, components, search, se
   const spacerRef = useRef<HTMLDivElement>(null);
   const updateViewportRef = useRef<() => void>(() => undefined);
   const lastScrolledSearchRef = useRef<string | null>(null);
+  const lastRestoredRef = useRef<string | null>(null);
+  const restoringRef = useRef<string | null>(null);
+  const lastFragmentRef = useRef<string | null>(null);
+  const pendingFragmentRef = useRef<string | null>(null);
 
   useEffect(() => {
     const worker = new Worker(new URL("./markdown.worker.ts", import.meta.url), { type: "module" });
@@ -134,13 +154,170 @@ export default function MarkdownWorkerRenderer({ content, components, search, se
     ? 0
     : Math.min(blocks.length, findBlock(layout.offsets, viewport.offset + viewport.height + overscan) + 1);
   const visible = blocks.slice(start, Math.max(start, end));
+  const restoreBlockIndex = restoreOffset === null
+    ? -1
+    : blocks.findIndex((block) => containsOffset(block.node.position, restoreOffset));
+  const restoreBlockTop = restoreBlockIndex >= 0 ? layout.offsets[restoreBlockIndex] : null;
+  const targetBlockIndex = targetFragment
+    ? blocks.findIndex((block) => nodeContainsId(block.node, targetFragment))
+    : -1;
+  const targetBlockTop = targetBlockIndex >= 0 ? layout.offsets[targetBlockIndex] : null;
 
   useEffect(() => {
     updateViewportRef.current();
   }, [blocks.length, layout.height]);
 
   useEffect(() => {
-    if (searchOffset === null) {
+    if (restoreOffset === null && restoreProgress === null) return;
+    if (searchOffset !== null || targetFragment !== null) {
+      onScrollRestored();
+      return;
+    }
+
+    const requestKey = `${content.length}:${restoreOffset ?? "progress"}:${restoreProgress ?? ""}`;
+    if (lastRestoredRef.current === requestKey || restoringRef.current === requestKey) return;
+    const article = articleRef.current;
+    const spacer = spacerRef.current;
+    const scrollContainer = article?.parentElement;
+    if (!scrollContainer || !spacer) return;
+
+    if (restoreOffset === null) {
+      if (!current.complete) return;
+      const max = scrollContainer.scrollHeight - scrollContainer.clientHeight;
+      scrollContainer.scrollTop = (restoreProgress ?? 0) * Math.max(0, max);
+      lastRestoredRef.current = requestKey;
+      onScrollRestored();
+      return;
+    }
+
+    const blockIndex = restoreBlockIndex;
+    if (blockIndex < 0 && !current.complete) return;
+    if (current.error || blockIndex < 0) {
+      if (!current.complete) return;
+      const max = scrollContainer.scrollHeight - scrollContainer.clientHeight;
+      scrollContainer.scrollTop = (restoreProgress ?? 0) * Math.max(0, max);
+      lastRestoredRef.current = requestKey;
+      onScrollRestored();
+      return;
+    }
+    restoringRef.current = requestKey;
+    const spacerTop = spacer.getBoundingClientRect().top
+      - scrollContainer.getBoundingClientRect().top
+      + scrollContainer.scrollTop;
+    scrollContainer.scrollTop = Math.max(0, spacerTop + (restoreBlockTop ?? 0) - 32);
+    updateViewportRef.current();
+
+    let attempts = 0;
+    let frame = 0;
+    let completed = false;
+    const alignRenderedBlock = () => {
+      const block = spacer.querySelector<HTMLElement>(`[data-virtual-index="${blockIndex}"]`);
+      if (block) {
+        const actualTop = block.getBoundingClientRect().top
+          - scrollContainer.getBoundingClientRect().top
+          + scrollContainer.scrollTop;
+        scrollContainer.scrollTop = Math.max(0, actualTop - 32);
+        updateViewportRef.current();
+        completed = true;
+        restoringRef.current = null;
+        lastRestoredRef.current = requestKey;
+        onScrollRestored();
+        return;
+      }
+      attempts += 1;
+      if (attempts >= 8) {
+        completed = true;
+        restoringRef.current = null;
+        lastRestoredRef.current = requestKey;
+        onScrollRestored();
+        return;
+      }
+      frame = requestAnimationFrame(alignRenderedBlock);
+    };
+    frame = requestAnimationFrame(alignRenderedBlock);
+
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      if (!completed && restoringRef.current === requestKey) restoringRef.current = null;
+    };
+  }, [
+    content.length,
+    current.complete,
+    current.error,
+    onScrollRestored,
+    restoreBlockIndex,
+    restoreBlockTop,
+    restoreOffset,
+    restoreProgress,
+    searchOffset,
+    targetFragment,
+  ]);
+
+  useEffect(() => {
+    if (!targetFragment) {
+      lastFragmentRef.current = null;
+      pendingFragmentRef.current = null;
+      return;
+    }
+    if (lastFragmentRef.current === targetFragment || pendingFragmentRef.current === targetFragment) return;
+    const article = articleRef.current;
+    const spacer = spacerRef.current;
+    const scrollContainer = article?.parentElement;
+    if (!scrollContainer || !spacer) return;
+
+    const blockIndex = targetBlockIndex;
+    if (blockIndex < 0) {
+      if (current.complete) {
+        lastFragmentRef.current = targetFragment;
+        onFragmentNavigated();
+      }
+      return;
+    }
+
+    pendingFragmentRef.current = targetFragment;
+    const spacerTop = spacer.getBoundingClientRect().top
+      - scrollContainer.getBoundingClientRect().top
+      + scrollContainer.scrollTop;
+    scrollContainer.scrollTop = Math.max(0, spacerTop + (targetBlockTop ?? 0) - 24);
+    updateViewportRef.current();
+
+    let attempts = 0;
+    let frame = 0;
+    let completed = false;
+    const findRenderedHeading = () => {
+      const target = Array.from(spacer.querySelectorAll<HTMLElement>("[id]"))
+        .find((element) => element.id === targetFragment);
+      if (target) {
+        const targetTop = target.getBoundingClientRect().top
+          - scrollContainer.getBoundingClientRect().top
+          + scrollContainer.scrollTop;
+        scrollContainer.scrollTop = Math.max(0, targetTop - 24);
+        updateViewportRef.current();
+        completed = true;
+        pendingFragmentRef.current = null;
+        lastFragmentRef.current = targetFragment;
+        onFragmentNavigated();
+        return;
+      }
+      attempts += 1;
+      if (attempts >= 12) {
+        completed = true;
+        pendingFragmentRef.current = null;
+        lastFragmentRef.current = targetFragment;
+        onFragmentNavigated();
+        return;
+      }
+      frame = requestAnimationFrame(findRenderedHeading);
+    };
+    frame = requestAnimationFrame(findRenderedHeading);
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      if (!completed && pendingFragmentRef.current === targetFragment) pendingFragmentRef.current = null;
+    };
+  }, [current.complete, onFragmentNavigated, targetBlockIndex, targetBlockTop, targetFragment]);
+
+  useEffect(() => {
+    if (searchOffset === null || targetFragment !== null) {
       lastScrolledSearchRef.current = null;
       return;
     }
@@ -163,7 +340,7 @@ export default function MarkdownWorkerRenderer({ content, components, search, se
       top: spacerTop + layout.offsets[blockIndex],
       behavior: "smooth",
     });
-  }, [blocks, layout.offsets, searchOffset, searchNavigation]);
+  }, [blocks, layout.offsets, searchOffset, searchNavigation, targetFragment]);
 
   useEffect(() => {
     const spacer = spacerRef.current;
@@ -276,4 +453,11 @@ function findBlock(offsets: number[], offset: number): number {
     else high = middle;
   }
   return Math.min(low, offsets.length - 2);
+}
+
+function nodeContainsId(node: unknown, id: string): boolean {
+  if (!node || typeof node !== "object") return false;
+  const candidate = node as { properties?: { id?: unknown }; children?: unknown[] };
+  if (candidate.properties?.id === id) return true;
+  return candidate.children?.some((child) => nodeContainsId(child, id)) ?? false;
 }

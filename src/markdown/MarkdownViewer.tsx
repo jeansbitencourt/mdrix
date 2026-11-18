@@ -1,5 +1,5 @@
 import { Children, isValidElement, memo, useEffect, useMemo, useRef, useState } from "react";
-import ReactMarkdown, { type Components } from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
@@ -19,6 +19,12 @@ type Props = {
   search: string;
   searchOffset: number | null;
   searchNavigation: number;
+  restoreOffset: number | null;
+  restoreProgress: number | null;
+  onScrollRestored: () => void;
+  targetFragment: string | null;
+  onFragmentNavigated: () => void;
+  onNavigateFragment: (fragment: string) => void;
 };
 const largeDocumentThreshold = 128 * 1024;
 
@@ -53,26 +59,49 @@ const MarkdownViewer = memo(function MarkdownViewer({
   search,
   searchOffset,
   searchNavigation,
+  restoreOffset,
+  restoreProgress,
+  onScrollRestored,
+  targetFragment,
+  onFragmentNavigated,
+  onNavigateFragment,
 }: Props) {
   const articleRef = useRef<HTMLElement>(null);
+  const lastRestoreRef = useRef<string | null>(null);
   const components = useMemo<Components>(() => ({
     img({ src, alt }) {
       return <LocalImage src={src} alt={alt} documentPath={documentPath} />;
     },
     a({ href, children, ...props }) {
-      const isExternal = /^https?:\/\//i.test(href ?? "") || /^mailto:/i.test(href ?? "");
+      const isExternal = /^https?:\/\//i.test(href ?? "") || /^mailto:/i.test(href ?? "") || href?.startsWith("//");
       return (
         <a
           {...props}
           href={href}
           onClick={(event) => {
-            if (href?.startsWith("#")) return;
-            event.preventDefault();
-            if (!isExternal || !href) {
-              onError("Links para outros arquivos ainda não estão habilitados.");
+            if (href?.startsWith("#")) {
+              event.preventDefault();
+              const rawFragment = href.slice(1);
+              let fragment = rawFragment;
+              try { fragment = decodeURIComponent(rawFragment); } catch { /* Keep the literal fragment. */ }
+              onNavigateFragment(fragment);
               return;
             }
-            void invoke("open_external", { url: href }).catch((cause) => onError(String(cause)));
+            event.preventDefault();
+            if (!href) {
+              onError("O link não tem um destino válido.");
+              return;
+            }
+            if (isExternal) {
+              const url = href.startsWith("//") ? `https:${href}` : href;
+              void invoke("open_external", { url }).catch((cause) => onError(String(cause)));
+              return;
+            }
+            void invoke<string | null>("open_local_link", { documentPath, href })
+              .then((fragment) => {
+                if (typeof fragment === "string") onNavigateFragment(fragment);
+              })
+              .catch((cause) => onError(String(cause)));
           }}
         >
           {children}
@@ -110,10 +139,79 @@ const MarkdownViewer = memo(function MarkdownViewer({
     input({ checked, ...props }) {
       return <input type="checkbox" checked={checked} disabled {...props} />;
     },
-  }), [dark, documentPath, onError]);
+  }), [dark, documentPath, onError, onNavigateFragment]);
 
   useEffect(() => {
-    if (content.length >= largeDocumentThreshold || searchOffset === null) return;
+    if (content.length >= largeDocumentThreshold) return;
+    if (searchOffset !== null || targetFragment !== null) {
+      if (restoreOffset !== null || restoreProgress !== null) onScrollRestored();
+      return;
+    }
+    if (restoreOffset === null && restoreProgress === null) return;
+    const restoreKey = `${content.length}:${restoreOffset ?? "progress"}:${restoreProgress ?? ""}`;
+    if (lastRestoreRef.current === restoreKey) return;
+    const article = articleRef.current;
+    const scrollContainer = article?.parentElement;
+    if (!article || !scrollContainer) return;
+
+    if (restoreOffset !== null) {
+      const nodes = Array.from(article.querySelectorAll<HTMLElement>("[data-source-start][data-source-end]"));
+      let target: HTMLElement | null = null;
+      let nearestDistance = Number.POSITIVE_INFINITY;
+      for (const node of nodes) {
+        const start = Number(node.dataset.sourceStart);
+        const end = Number(node.dataset.sourceEnd);
+        if (start <= restoreOffset && restoreOffset < end) {
+          target = node;
+          break;
+        }
+        const distance = Math.min(Math.abs(start - restoreOffset), Math.abs(end - restoreOffset));
+        if (distance < nearestDistance) {
+          target = node;
+          nearestDistance = distance;
+        }
+      }
+      if (!target) {
+        if (nodes.length > 0) return;
+        const max = scrollContainer.scrollHeight - scrollContainer.clientHeight;
+        scrollContainer.scrollTop = (restoreProgress ?? 0) * Math.max(0, max);
+        lastRestoreRef.current = restoreKey;
+        onScrollRestored();
+        return;
+      }
+      lastRestoreRef.current = restoreKey;
+      const targetTop = target.getBoundingClientRect().top
+        - scrollContainer.getBoundingClientRect().top
+        + scrollContainer.scrollTop;
+      scrollContainer.scrollTop = Math.max(0, targetTop - 32);
+      onScrollRestored();
+      return;
+    }
+
+    lastRestoreRef.current = restoreKey;
+    const max = scrollContainer.scrollHeight - scrollContainer.clientHeight;
+    scrollContainer.scrollTop = (restoreProgress ?? 0) * Math.max(0, max);
+    onScrollRestored();
+  }, [content, onScrollRestored, restoreOffset, restoreProgress, searchOffset]);
+
+  useEffect(() => {
+    if (!targetFragment || content.length >= largeDocumentThreshold) return;
+    const article = articleRef.current;
+    const scrollContainer = article?.parentElement;
+    if (!article || !scrollContainer) return;
+    const target = Array.from(article.querySelectorAll<HTMLElement>("[id]"))
+      .find((element) => element.id === targetFragment);
+    if (target) {
+      const targetTop = target.getBoundingClientRect().top
+        - scrollContainer.getBoundingClientRect().top
+        + scrollContainer.scrollTop;
+      scrollContainer.scrollTop = Math.max(0, targetTop - 24);
+    }
+    onFragmentNavigated();
+  }, [content, onFragmentNavigated, targetFragment]);
+
+  useEffect(() => {
+    if (content.length >= largeDocumentThreshold || searchOffset === null || targetFragment !== null) return;
     const article = articleRef.current;
     const target = article?.querySelector<HTMLElement>(
       ".markdown-search-match-current, .markdown-search-current-block",
@@ -126,7 +224,7 @@ const MarkdownViewer = memo(function MarkdownViewer({
     const targetTop = targetRect.top - containerRect.top + scrollContainer.scrollTop;
     const centeredTop = targetTop - (scrollContainer.clientHeight - targetRect.height) / 2;
     scrollContainer.scrollTo({ top: Math.max(0, centeredTop), behavior: "smooth" });
-  }, [content, search, searchOffset, searchNavigation]);
+  }, [content, search, searchOffset, searchNavigation, targetFragment]);
 
   if (content.length >= largeDocumentThreshold) {
     return (
@@ -136,6 +234,11 @@ const MarkdownViewer = memo(function MarkdownViewer({
         search={search}
         searchOffset={searchOffset}
         searchNavigation={searchNavigation}
+        restoreOffset={restoreOffset}
+        restoreProgress={restoreProgress}
+        onScrollRestored={onScrollRestored}
+        targetFragment={targetFragment}
+        onFragmentNavigated={onFragmentNavigated}
       />
     );
   }
@@ -151,6 +254,7 @@ const MarkdownViewer = memo(function MarkdownViewer({
           rehypeSearch(search, searchOffset),
         ]}
         components={components}
+        urlTransform={(value) => /^file:(?:\/\/|\/)/i.test(value) ? value : defaultUrlTransform(value)}
         skipHtml
       >
         {content}
