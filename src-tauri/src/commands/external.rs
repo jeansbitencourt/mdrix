@@ -2,7 +2,10 @@ use std::process::Command;
 
 #[tauri::command]
 pub(crate) fn open_external(url: String) -> Result<(), String> {
-    if !(url.starts_with("https://") || url.starts_with("http://") || url.starts_with("mailto:")) {
+    let scheme = url
+        .split_once(':')
+        .map(|(scheme, _)| scheme.to_ascii_lowercase());
+    if !matches!(scheme.as_deref(), Some("http" | "https" | "mailto")) {
         return Err("Só links HTTP, HTTPS ou mailto podem ser abertos externamente.".into());
     }
     Command::new("xdg-open")

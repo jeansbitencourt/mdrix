@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Permissões mínimas para a janela principal do Mdrix.","local":true,"windows":["main"],"permissions":["core:default","core:window:allow-destroy"]}}
+{"default":{"identifier":"default","description":"Permissões mínimas para as janelas de documentos do Mdrix.","local":true,"windows":["main","document-*"],"permissions":["core:default","core:window:allow-destroy"]}}

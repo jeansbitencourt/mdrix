@@ -6,4 +6,5 @@ export type LoadedDocument = {
   fingerprint: string;
   lineEnding: LineEnding;
 };
+export type LaunchTarget = { path: string; fragment: string | null };
 export type PendingAction = { kind: "open"; path: string } | { kind: "close" };

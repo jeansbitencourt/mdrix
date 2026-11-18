@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permissões mínimas para a janela principal do Mdrix.",
-  "windows": ["main"],
+  "description": "Permissões mínimas para as janelas de documentos do Mdrix.",
+  "windows": ["main", "document-*"],
   "permissions": ["core:default", "core:window:allow-destroy"]
 }

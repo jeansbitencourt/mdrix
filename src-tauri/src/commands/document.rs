@@ -1,11 +1,19 @@
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use std::{fs, io::Write, path::PathBuf};
+use std::{
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
+    process::Command,
+    sync::atomic::{AtomicU64, Ordering},
+};
 use tauri::State;
 use tauri_plugin_dialog::DialogExt;
 use tempfile::NamedTempFile;
 
-use crate::state::LaunchPath;
+use crate::state::{LaunchTarget, LaunchTargets};
+
+static NEXT_DOCUMENT_WINDOW: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,8 +31,158 @@ pub(crate) struct SavePayload {
 }
 
 #[tauri::command]
-pub(crate) fn take_launch_path(state: State<'_, LaunchPath>) -> Option<String> {
-    state.take()
+pub(crate) fn take_launch_path(
+    window: tauri::WebviewWindow,
+    state: State<'_, LaunchTargets>,
+) -> Option<LaunchTarget> {
+    state.take(window.label())
+}
+
+#[tauri::command]
+pub(crate) fn open_local_link(
+    document_path: String,
+    href: String,
+    app: tauri::AppHandle,
+    targets: State<'_, LaunchTargets>,
+) -> Result<Option<String>, String> {
+    let (target, fragment) = resolve_local_link(&document_path, &href)?;
+    if !target.is_file() {
+        return Err("O destino do link não é um arquivo.".into());
+    }
+    let source = Path::new(&document_path)
+        .canonicalize()
+        .map_err(|error| format!("Não foi possível resolver o documento de origem: {error}"))?;
+    if target == source {
+        return Ok(fragment);
+    }
+
+    let extension = target
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if !matches!(extension.as_str(), "md" | "markdown") {
+        return Command::new("xdg-open")
+            .arg(&target)
+            .spawn()
+            .map(|_| None)
+            .map_err(|error| format!("Não foi possível abrir o arquivo no sistema: {error}"));
+    }
+
+    let label = format!(
+        "document-{}",
+        NEXT_DOCUMENT_WINDOW.fetch_add(1, Ordering::Relaxed)
+    );
+    let title = target
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("Mdrix")
+        .to_string();
+    targets.insert(
+        label.clone(),
+        LaunchTarget {
+            path: target.to_string_lossy().into_owned(),
+            fragment,
+        },
+    )?;
+
+    let result =
+        tauri::WebviewWindowBuilder::new(&app, &label, tauri::WebviewUrl::App("index.html".into()))
+            .title(title)
+            .build();
+    if let Err(error) = result {
+        targets.remove(&label);
+        return Err(format!("Não foi possível abrir uma nova janela: {error}"));
+    }
+    Ok(None)
+}
+
+fn resolve_local_link(
+    document_path: &str,
+    href: &str,
+) -> Result<(PathBuf, Option<String>), String> {
+    let (path_and_query, fragment) = href
+        .split_once('#')
+        .map(|(path, fragment)| (path, Some(fragment)))
+        .unwrap_or((href, None));
+    let path_part = path_and_query
+        .split_once('?')
+        .map_or(path_and_query, |(path, _)| path);
+    if path_part.is_empty() {
+        return Err("O link não aponta para um arquivo local.".into());
+    }
+
+    let raw_path = if path_part.to_ascii_lowercase().starts_with("file://") {
+        let remainder = &path_part[7..];
+        if remainder.starts_with('/') {
+            remainder
+        } else {
+            let (host, path) = remainder
+                .split_once('/')
+                .ok_or_else(|| "A URL file: não contém um caminho local válido.".to_string())?;
+            if !host.eq_ignore_ascii_case("localhost") {
+                return Err("URLs file: só podem apontar para este computador.".into());
+            }
+            // Keep the slash that begins the absolute path.
+            return resolve_decoded_local_path(document_path, &format!("/{path}"), fragment);
+        }
+    } else if path_part.to_ascii_lowercase().starts_with("file:/") {
+        &path_part[5..]
+    } else {
+        if has_uri_scheme(path_part) {
+            return Err("O esquema deste link local não é suportado.".into());
+        }
+        path_part
+    };
+
+    resolve_decoded_local_path(document_path, raw_path, fragment)
+}
+
+fn resolve_decoded_local_path(
+    document_path: &str,
+    raw_path: &str,
+    fragment: Option<&str>,
+) -> Result<(PathBuf, Option<String>), String> {
+    let decoded_path = percent_encoding::percent_decode_str(raw_path)
+        .decode_utf8()
+        .map_err(|_| "O caminho do link contém texto inválido.".to_string())?;
+    let decoded_path = Path::new(decoded_path.as_ref());
+    let target = if decoded_path.is_absolute() {
+        decoded_path.to_path_buf()
+    } else {
+        let source = Path::new(document_path)
+            .canonicalize()
+            .map_err(|error| format!("Não foi possível resolver o documento de origem: {error}"))?;
+        let base = source
+            .parent()
+            .ok_or_else(|| "O documento de origem não tem uma pasta válida.".to_string())?;
+        base.join(decoded_path)
+    }
+    .canonicalize()
+    .map_err(|error| format!("Não foi possível localizar o destino do link: {error}"))?;
+    let fragment = fragment
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            percent_encoding::percent_decode_str(value)
+                .decode_utf8()
+                .map(|value| value.into_owned())
+                .map_err(|_| "A âncora do link contém texto inválido.".to_string())
+        })
+        .transpose()?;
+    Ok((target, fragment))
+}
+
+fn has_uri_scheme(value: &str) -> bool {
+    let Some((scheme, _)) = value.split_once(':') else {
+        return false;
+    };
+    let mut characters = scheme.chars();
+    characters
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic())
+        && characters.all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '+' | '.' | '-')
+        })
 }
 
 #[tauri::command]
