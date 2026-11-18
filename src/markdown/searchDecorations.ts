@@ -33,7 +33,7 @@ export function decorateSearchTree(tree: Root, query: string, activeOffset: numb
 }
 
 export function decorateSearchNode(node: RootContent, query: string, activeOffset: number | null): RootContent {
-  return decorateNode(node as SearchNode, query, activeOffset) as RootContent;
+  return decorateNode(cloneSearchNode(node as SearchNode), query, activeOffset) as RootContent;
 }
 
 export function sourceRange(node: RootContent): { start: number; end: number } | null {
@@ -108,6 +108,31 @@ function textSlice(node: SearchNode, start: number, end: number, value: string):
     }
     : node.position;
   return { ...node, value, position };
+}
+
+function cloneSearchNode(node: SearchNode): SearchNode {
+  const properties = node.properties
+    ? {
+      ...node.properties,
+      ...(Array.isArray(node.properties.className)
+        ? { className: [...node.properties.className] }
+        : {}),
+    }
+    : undefined;
+  return {
+    ...node,
+    ...(node.position
+      ? {
+        position: {
+          ...node.position,
+          ...(node.position.start ? { start: { ...node.position.start } } : {}),
+          ...(node.position.end ? { end: { ...node.position.end } } : {}),
+        },
+      }
+      : {}),
+    ...(properties ? { properties } : {}),
+    ...(node.children ? { children: node.children.map(cloneSearchNode) } : {}),
+  };
 }
 
 function addSourceProperties(element: Element): void {
