@@ -4,7 +4,7 @@ import { jsx, jsxs } from "react/jsx-runtime";
 import { toJsxRuntime, type Components as HastComponents } from "hast-util-to-jsx-runtime";
 import type { Components } from "react-markdown";
 import { containsOffset, decorateSearchNode, sourceRange } from "./searchDecorations";
-import type { MarkdownRenderBlock, MarkdownWorkerResponse } from "./workerMessages";
+import type { MarkdownHeading, MarkdownOutlineEntry, MarkdownRenderBlock, MarkdownWorkerResponse } from "./workerMessages";
 
 type Props = {
   content: string;
@@ -17,10 +17,13 @@ type Props = {
   onScrollRestored: () => void;
   targetFragment: string | null;
   onFragmentNavigated: () => void;
+  onOutlineChange: (headings: MarkdownHeading[]) => void;
+  onActiveHeadingChange: (headingId: string | null) => void;
 };
 type Snapshot = {
   content: string;
   blocks: MarkdownRenderBlock[];
+  headings: MarkdownOutlineEntry[];
   phase: "parse" | "plugins" | "sending";
   processed: number;
   total: number;
@@ -44,6 +47,8 @@ export default function MarkdownWorkerRenderer({
   onScrollRestored,
   targetFragment,
   onFragmentNavigated,
+  onOutlineChange,
+  onActiveHeadingChange,
 }: Props) {
   const [snapshot, setSnapshot] = useState<Snapshot>(() => emptySnapshot(content));
   const [measurements, setMeasurements] = useState<Measurements>(() => ({ content, values: new Map() }));
@@ -81,6 +86,9 @@ export default function MarkdownWorkerRenderer({
           return {
             ...current,
             blocks: [...current.blocks, ...message.blocks],
+            headings: message.headings.length > 0
+              ? [...current.headings, ...message.headings]
+              : current.headings,
             processed: message.processed,
             total: message.total,
           };
@@ -162,6 +170,27 @@ export default function MarkdownWorkerRenderer({
     ? blocks.findIndex((block) => nodeContainsId(block.node, targetFragment))
     : -1;
   const targetBlockTop = targetBlockIndex >= 0 ? layout.offsets[targetBlockIndex] : null;
+  const activeHeadingId = useMemo(() => {
+    if (current.error || current.headings.length === 0) return null;
+    const activationOffset = viewport.offset + 48;
+    let activeId = current.headings[0].id;
+    for (const heading of current.headings) {
+      const headingOffset = layout.offsets[Math.min(heading.blockIndex, layout.offsets.length - 1)] ?? 0;
+      if (headingOffset > activationOffset) break;
+      activeId = heading.id;
+    }
+    return activeId;
+  }, [current.error, current.headings, layout.offsets, viewport.offset]);
+
+  useEffect(() => {
+    onOutlineChange(current.error
+      ? []
+      : current.headings.map(({ id, title, level }) => ({ id, title, level })));
+  }, [current.error, current.headings, onOutlineChange]);
+
+  useEffect(() => {
+    onActiveHeadingChange(activeHeadingId);
+  }, [activeHeadingId, onActiveHeadingChange]);
 
   useEffect(() => {
     updateViewportRef.current();
@@ -441,7 +470,7 @@ export default function MarkdownWorkerRenderer({
 }
 
 function emptySnapshot(content: string): Snapshot {
-  return { content, blocks: [], phase: "parse", processed: 0, total: 0, complete: false, error: null };
+  return { content, blocks: [], headings: [], phase: "parse", processed: 0, total: 0, complete: false, error: null };
 }
 
 function findBlock(offsets: number[], offset: number): number {

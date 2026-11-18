@@ -9,7 +9,7 @@ import rehypeHighlight from "rehype-highlight";
 import rehypeSlug from "rehype-slug";
 import type { Element, Root as HastRoot } from "hast";
 import type { Root as MarkdownRoot } from "mdast";
-import type { MarkdownRenderBlock, MarkdownWorkerRequest, MarkdownWorkerResponse } from "./workerMessages";
+import type { MarkdownOutlineEntry, MarkdownRenderBlock, MarkdownWorkerRequest, MarkdownWorkerResponse } from "./workerMessages";
 
 type WorkerScope = {
   onmessage: ((event: MessageEvent<MarkdownWorkerRequest>) => void) | null;
@@ -244,13 +244,52 @@ function postBlockBatch(nodes: HastRoot["children"], previousCount: number, tota
     node,
     estimatedHeight: estimateHeight(node),
     }));
+  const headings: MarkdownOutlineEntry[] = [];
+  blocks.forEach((block, index) => collectHeadings(block.node, previousCount + index, headings));
   scope.postMessage({
     type: "blocks",
     blocks,
+    headings,
     processed: previousCount + blocks.length,
     total,
   });
   return blocks.length;
+}
+
+function collectHeadings(node: unknown, blockIndex: number, headings: MarkdownOutlineEntry[]) {
+  if (!node || typeof node !== "object") return;
+  const candidate = node as {
+    type?: string;
+    tagName?: string;
+    properties?: { id?: unknown; alt?: unknown };
+    value?: unknown;
+    children?: unknown[];
+  };
+  const match = candidate.type === "element" ? /^h([1-6])$/.exec(candidate.tagName ?? "") : null;
+  const id = candidate.properties?.id;
+  if (match && typeof id === "string") {
+    const title = headingText(candidate).replace(/\s+/g, " ").trim();
+    if (title) {
+      headings.push({ id, title, level: Number(match[1]) as MarkdownOutlineEntry["level"], blockIndex });
+    }
+  }
+  candidate.children?.forEach((child) => collectHeadings(child, blockIndex, headings));
+}
+
+function headingText(node: unknown): string {
+  if (!node || typeof node !== "object") return "";
+  const candidate = node as {
+    type?: string;
+    tagName?: string;
+    properties?: { alt?: unknown };
+    value?: unknown;
+    children?: unknown[];
+  };
+  if (candidate.type === "text" && typeof candidate.value === "string") return candidate.value;
+  if (candidate.type === "element" && candidate.tagName === "img") {
+    return typeof candidate.properties?.alt === "string" ? candidate.properties.alt : "";
+  }
+  return candidate.children?.map(headingText).join("") ?? "";
 }
 
 function countRenderableBlocks(nodes: HastRoot["children"]): number {

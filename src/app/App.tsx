@@ -8,9 +8,11 @@ import EmptyState from "../components/EmptyState";
 import { LoadingOverlay, Notice, PendingChanges } from "../components/Feedback";
 import SearchStrip from "../components/SearchStrip";
 import StatusBar from "../components/StatusBar";
+import TableOfContents from "../components/TableOfContents";
 import Toolbar from "../components/Toolbar";
 import MarkdownViewer from "../markdown/MarkdownViewer";
 import { markdownEditorHighlighting } from "../markdown/editorHighlight";
+import type { MarkdownHeading } from "../markdown/workerMessages";
 import { findOccurrences, normalizeNewlines } from "./text";
 import type { LaunchTarget, LoadedDocument, Mode, PendingAction } from "./types";
 
@@ -58,6 +60,13 @@ export default function App() {
   const [openingDialog, setOpeningDialog] = useState(false);
   const [scrollRestore, setScrollRestore] = useState<ScrollRestore | null>(null);
   const [targetFragment, setTargetFragment] = useState<string | null>(null);
+  const [outlineState, setOutlineState] = useState<{ content: string; headings: MarkdownHeading[] }>({ content: "", headings: [] });
+  const [activeHeadingId, setActiveHeadingId] = useState<string | null>(null);
+  const [contentsMenuOpen, setContentsMenuOpen] = useState(false);
+  const [wideContentsLayout, setWideContentsLayout] = useState(() =>
+    window.matchMedia("(min-width: 1380px)").matches,
+  );
+  const outline = outlineState.content === renderedContent ? outlineState.headings : [];
   const dirty = content !== savedContent;
   const busy = Boolean(loadingMessage) || openingDialog;
   const searchMatches = useMemo(() => findOccurrences(content, search), [content, search]);
@@ -86,7 +95,11 @@ export default function App() {
       setError("Abra um arquivo Markdown para alternar o modo.");
       return;
     }
-    if (mode === "edit") setRenderedContent(contentRef.current);
+    if (mode === "edit") {
+      setRenderedContent(contentRef.current);
+      setActiveHeadingId(null);
+    }
+    setContentsMenuOpen(false);
     const source = mode === "read" ? viewerRef.current : editorViewRef.current?.scrollDOM;
     if (source) {
       const restore = {
@@ -106,6 +119,14 @@ export default function App() {
     setMode((current) => current === "read" ? "edit" : "read");
   }, [mode]);
 
+  const handleOutlineChange = useCallback((headings: MarkdownHeading[]) => {
+    setOutlineState({ content: renderedContent, headings });
+  }, [renderedContent]);
+
+  const handleActiveHeadingChange = useCallback((headingId: string | null) => {
+    setActiveHeadingId(headingId);
+  }, []);
+
   const loadPath = useCallback(async (path: string, fragment: string | null = null) => {
     const sequence = loadSequenceRef.current + 1;
     loadSequenceRef.current = sequence;
@@ -120,6 +141,7 @@ export default function App() {
       setContent(normalized);
       setRenderedContent(normalized);
       setSavedContent(normalized);
+      setContentsMenuOpen(false);
       setError(null);
       setStatus(null);
       setPending(null);
@@ -246,6 +268,20 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const media = window.matchMedia("(min-width: 1380px)");
+    const updateLayout = () => setWideContentsLayout(media.matches);
+    media.addEventListener("change", updateLayout);
+    updateLayout();
+    return () => media.removeEventListener("change", updateLayout);
+  }, []);
+
+  useEffect(() => {
+    if (wideContentsLayout || mode !== "read" || outline.length === 0) {
+      setContentsMenuOpen(false);
+    }
+  }, [mode, outline.length, wideContentsLayout]);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!event.ctrlKey && !event.metaKey) return;
       if (loadingMessage || openingDialog) {
@@ -349,6 +385,8 @@ export default function App() {
         onModeChange={handleModeChange}
         onSearch={() => setSearchOpen(true)}
         onThemeChange={() => setDark((current) => !current)}
+        showContentsMenu={mode === "read" && !wideContentsLayout && outline.length > 0}
+        onOpenContents={() => setContentsMenuOpen(true)}
       />
 
       {searchOpen && (
@@ -397,6 +435,8 @@ export default function App() {
                 targetFragment={targetFragment}
                 onFragmentNavigated={handleFragmentNavigated}
                 onNavigateFragment={handleNavigateFragment}
+                onOutlineChange={handleOutlineChange}
+                onActiveHeadingChange={handleActiveHeadingChange}
               />
             ) : (
               <EmptyState onOpen={() => void openFile()} />
@@ -435,6 +475,26 @@ export default function App() {
             </div>
             {!document && <div className="editor-hint">O conteúdo novo só pode ser salvo depois de abrir um arquivo existente.</div>}
           </div>
+        )}
+        {document && outline.length > 0 && (
+          <>
+            {mode === "read" && wideContentsLayout && (
+              <TableOfContents
+                variant="rail"
+                headings={outline}
+                activeHeadingId={activeHeadingId}
+                onNavigate={handleNavigateFragment}
+              />
+            )}
+            <TableOfContents
+              variant="dialog"
+              open={mode === "read" && !wideContentsLayout && contentsMenuOpen}
+              headings={outline}
+              activeHeadingId={activeHeadingId}
+              onNavigate={handleNavigateFragment}
+              onClose={() => setContentsMenuOpen(false)}
+            />
+          </>
         )}
         {loadingMessage && <LoadingOverlay message={loadingMessage} />}
       </section>

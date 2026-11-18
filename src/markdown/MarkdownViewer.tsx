@@ -1,4 +1,4 @@
-import { Children, isValidElement, memo, useEffect, useMemo, useRef, useState } from "react";
+import { Children, isValidElement, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -10,6 +10,7 @@ import MermaidBlock from "./MermaidBlock";
 import MarkdownMath from "./MarkdownMath";
 import MarkdownWorkerRenderer from "./MarkdownWorkerRenderer";
 import { rehypeSearch } from "./searchDecorations";
+import type { MarkdownHeading } from "./workerMessages";
 
 type Props = {
   content: string;
@@ -25,8 +26,11 @@ type Props = {
   targetFragment: string | null;
   onFragmentNavigated: () => void;
   onNavigateFragment: (fragment: string) => void;
+  onOutlineChange: (headings: MarkdownHeading[]) => void;
+  onActiveHeadingChange: (headingId: string | null) => void;
 };
 const largeDocumentThreshold = 128 * 1024;
+const headingSelector = "h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]";
 
 function LocalImage({ src, alt, documentPath }: { src?: string; alt?: string; documentPath: string }) {
   const [dataUrl, setDataUrl] = useState<string | null>(null);
@@ -65,6 +69,8 @@ const MarkdownViewer = memo(function MarkdownViewer({
   targetFragment,
   onFragmentNavigated,
   onNavigateFragment,
+  onOutlineChange,
+  onActiveHeadingChange,
 }: Props) {
   const articleRef = useRef<HTMLElement>(null);
   const lastRestoreRef = useRef<string | null>(null);
@@ -140,6 +146,63 @@ const MarkdownViewer = memo(function MarkdownViewer({
       return <input type="checkbox" checked={checked} disabled {...props} />;
     },
   }), [dark, documentPath, onError, onNavigateFragment]);
+
+  useLayoutEffect(() => {
+    if (content.length >= largeDocumentThreshold) return;
+    const article = articleRef.current;
+    if (!article) {
+      onOutlineChange([]);
+      return;
+    }
+    const headings = Array.from(article.querySelectorAll<HTMLElement>(headingSelector))
+      .map((heading) => ({
+        id: heading.id,
+        title: (heading.textContent ?? "").replace(/\s+/g, " ").trim(),
+        level: Number(heading.tagName.slice(1)) as MarkdownHeading["level"],
+      }))
+      .filter((heading) => heading.id && heading.title);
+    onOutlineChange(headings);
+  }, [content, onOutlineChange]);
+
+  useEffect(() => {
+    if (content.length >= largeDocumentThreshold) return;
+    const article = articleRef.current;
+    const scrollContainer = article?.parentElement;
+    if (!article || !scrollContainer) {
+      onActiveHeadingChange(null);
+      return;
+    }
+
+    let frame = 0;
+    const update = () => {
+      const activationLine = scrollContainer.getBoundingClientRect().top + 48;
+      const headings = Array.from(article.querySelectorAll<HTMLElement>(headingSelector));
+      let activeId = headings[0]?.id ?? null;
+      for (const heading of headings) {
+        if (heading.getBoundingClientRect().top > activationLine) break;
+        activeId = heading.id;
+      }
+      onActiveHeadingChange(activeId);
+    };
+    const scheduleUpdate = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        update();
+      });
+    };
+    const resizeObserver = new ResizeObserver(scheduleUpdate);
+    resizeObserver.observe(scrollContainer);
+    resizeObserver.observe(article);
+    scrollContainer.addEventListener("scroll", scheduleUpdate, { passive: true });
+    scheduleUpdate();
+
+    return () => {
+      scrollContainer.removeEventListener("scroll", scheduleUpdate);
+      resizeObserver.disconnect();
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [content, onActiveHeadingChange]);
 
   useEffect(() => {
     if (content.length >= largeDocumentThreshold) return;
@@ -239,6 +302,8 @@ const MarkdownViewer = memo(function MarkdownViewer({
         onScrollRestored={onScrollRestored}
         targetFragment={targetFragment}
         onFragmentNavigated={onFragmentNavigated}
+        onOutlineChange={onOutlineChange}
+        onActiveHeadingChange={onActiveHeadingChange}
       />
     );
   }

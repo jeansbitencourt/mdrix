@@ -22,6 +22,8 @@ Na raiz do repositório:
 
 O app também abre documentos pela interface ou com Ctrl+O e salva com Ctrl+S.
 
+No modo de leitura, use o sumário pelos títulos à esquerda em janelas largas ou pelo botão **Menu** em janelas menores. Selecione um título para ir até essa seção.
+
 ## Instalação local no Linux
 
 Para compilar e instalar o app para o usuário atual, incluindo o atalho no launcher e o ícone:

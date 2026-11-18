@@ -13,6 +13,8 @@ type ToolbarProps = {
   onModeChange: () => void;
   onSearch: () => void;
   onThemeChange: () => void;
+  showContentsMenu: boolean;
+  onOpenContents: () => void;
 };
 
 export default function Toolbar({
@@ -28,6 +30,8 @@ export default function Toolbar({
   onModeChange,
   onSearch,
   onThemeChange,
+  showContentsMenu,
+  onOpenContents,
 }: ToolbarProps) {
   return (
     <header className="topbar">
@@ -43,6 +47,7 @@ export default function Toolbar({
           <button className="quiet-button" onClick={onSave} title="Salvar (Ctrl+S)" disabled={!hasDocument || busy}>Salvar</button>
         </div>
         <div className="toolbar-group" role="group" aria-label="Visualização e ferramentas">
+          {showContentsMenu && <button className="quiet-button toc-toolbar-button" onClick={onOpenContents} title="Abrir títulos do documento" disabled={busy}>Menu</button>}
           <button className="quiet-button mode-button" onClick={onModeChange} title="Alternar modo (Ctrl+E)" disabled={!hasDocument || busy}>
             <span className="mode-indicator" />{mode === "read" ? "Editar" : "Ler"}
           </button>
